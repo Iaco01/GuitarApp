@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildTimeline, beatPositionAtTime, timeAtBeatPosition } from '../src/timeline.js';
-import { quantizeTaps, createTapTempo } from '../src/taprecord.js';
+import { quantizeTaps, createTapTempo, suspiciousDurations } from '../src/taprecord.js';
 import { createSong } from '../src/model.js';
 
 const mkSong = (sections) => createSong({
@@ -88,4 +88,10 @@ test('tap tempo averages the last 4 intervals and resets after 2 s', () => {
   assert.equal(t.tap(2.4), Math.round((60 / ((2.4 - 0.5) / 4)) * 10) / 10); // oldest tap dropped
   assert.equal(t.tap(10), null); // reset
   assert.equal(t.tap(10.6), 100);
+});
+
+test('suspiciousDurations flags >= 2x and <= 1/2 of the median', () => {
+  assert.deepEqual(suspiciousDurations([4, 4, 8, 4, 4, 2, 3]), [false, false, true, false, false, true, false]);
+  assert.deepEqual(suspiciousDurations([4, 4, 4, 4]), [false, false, false, false]);
+  assert.deepEqual(suspiciousDurations([4, 8]), [false, false]);
 });

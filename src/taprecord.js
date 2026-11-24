@@ -54,3 +54,13 @@ export function createTapTempo({ window = 4, resetSec = 2 } = {}) {
     },
   };
 }
+
+// Flags durations that look like a skipped (or extra) tap: at least twice or at most half of the
+// median duration of the recorded span. Returns one boolean per duration.
+export function suspiciousDurations(durations) {
+  if (durations.length < 3) return durations.map(() => false);
+  const sorted = durations.slice().sort((a, b) => a - b);
+  const mid = sorted.length >> 1;
+  const median = sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+  return durations.map((d) => d >= 2 * median || d <= median / 2);
+}

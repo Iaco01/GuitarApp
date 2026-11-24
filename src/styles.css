@@ -248,3 +248,8 @@ h1, h2, h3, p, ul, ol, dl, dd { margin: 0; }
 .pp-pat { flex-wrap: nowrap; max-width: 100%; }
 .pp-cell { min-width: 11px; font-size: 12px; }
 .pp-next { min-width: 0; }
+
+.rec-rows li { align-items: center; gap: 8px; }
+.rec-rows li.warn { border-color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent); }
+.rec-warn { flex: 1; font: 600 13px var(--ui); color: var(--danger); }
+.rec-warn-sum { font: 600 14px var(--ui); color: var(--danger); }

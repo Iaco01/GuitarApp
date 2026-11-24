@@ -3,7 +3,7 @@
 
 import { domEl, domClear } from './dom.js';
 import { chordColorVar } from '../render.js';
-import { quantizeTaps } from '../taprecord.js';
+import { quantizeTaps, suspiciousDurations } from '../taprecord.js';
 import { beatPositionAtTime } from '../timeline.js';
 
 // Opens the overlay. `span` = { firstEventIndex, eventCount, label }. `player` is the shared
@@ -85,16 +85,20 @@ export function openRecorder({ song, player, getTimeline, span, onSave, onClose 
     domClear(overlay);
     const rows = domEl('ul', { class: 'rec-rows', id: 'rec-rows' });
     let changed = 0;
+    const odd = suspiciousDurations(result);
     result.forEach((beats, k) => {
       const ev = events[span.firstEventIndex + k];
       if (beats !== ev.beats) changed++;
-      rows.append(domEl('li', { class: beats !== ev.beats ? 'chg' : '' },
+      rows.append(domEl('li', { class: (beats !== ev.beats ? 'chg' : '') + (odd[k] ? ' warn' : '') },
         domEl('span', { class: 'rec-row-name', style: { '--cc': chordColorVar(song, ev.name) } }, ev.name),
+        odd[k] ? domEl('span', { class: 'rec-warn' }, 'forse hai saltato un tocco qui') : null,
         domEl('span', { class: 'rec-row-val' }, `${ev.beats} → ${beats}`)));
     });
+    const oddCount = odd.filter(Boolean).length;
     overlay.append(
       domEl('div', { class: 'rec-title' }, 'Durate registrate'),
       domEl('p', { class: 'rec-sum', id: 'rec-summary' }, changed ? `${changed} accordi cambiati su ${result.length}` : 'Nessuna durata cambiata'),
+      oddCount ? domEl('p', { class: 'rec-warn-sum', id: 'rec-warn-sum' }, `${oddCount} durate sospette: forse hai saltato un tocco. Controlla le righe evidenziate o scarta e riprova.`) : null,
       rows,
       domEl('div', { class: 'rec-bar' },
         domEl('button', { type: 'button', class: 'btn', id: 'rec-discard', onclick: close }, 'Scarta'),
