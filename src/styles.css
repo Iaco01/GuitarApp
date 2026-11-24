@@ -119,7 +119,7 @@ h1, h2, h3, p, ul, ol, dl, dd { margin: 0; }
 }
 .ch::before { content: ""; position: absolute; inset: -9px -4px; }
 .mk { font-size: .6em; font-weight: 700; margin-left: 1px; vertical-align: baseline; position: relative; top: -.55em; }
-.ly { display: block; padding-left: .3em; min-height: 1.3em; }
+.ly { display: block; min-height: 1.3em; }
 
 .warnings { margin-top: 20px; font-size: 14px; color: var(--muted); }
 .warnings summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; }

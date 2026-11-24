@@ -49,7 +49,7 @@ export function renderLine(song, line, sectionIndex, lineIndex, onTap) {
   for (const s of seg.segs) {
     const chord = line.chords[s.index];
     const ref = `${sectionIndex}.${lineIndex}.${s.index}`;
-    const width = chord.name.length + (chord.mark ? chord.mark.length : 0) + 2;
+    const width = chord.name.length + (chord.mark ? chord.mark.length : 0) + 1;
     parts.push(domEl('span', { class: 'seg', style: { minWidth: width + 'ch' } },
       renderChordLabel(song, chord, ref, onTap),
       domEl('span', { class: 'ly' }, s.word || ' ')));
