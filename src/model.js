@@ -243,3 +243,17 @@ export function groupRepeatedSections(sections) {
   }
   return groups;
 }
+
+// Songs already in the library that come from the same page as `song`: same source URL (when both
+// have one), else same title and artist. `stored` = full songs. Newest import first.
+export function findDuplicateSongs(song, stored) {
+  const norm2 = (v) => String(v || '').trim().toLowerCase();
+  const out = stored.filter((s) => {
+    if (!s) return false;
+    const url = s.source && s.source.url;
+    if (song.source && song.source.url && url) return url === song.source.url;
+    return norm2(s.title) === norm2(song.title) && norm2(s.artist) === norm2(song.artist);
+  });
+  const when = (s) => (s.source && s.source.importedAt) || s.updatedAt || '';
+  return out.sort((a, b) => (when(a) < when(b) ? 1 : when(a) > when(b) ? -1 : 0));
+}

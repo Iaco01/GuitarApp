@@ -2,28 +2,16 @@
 
 import { parseSongFromMht } from './parser.js';
 import { getSong, saveSong, listSongs } from './storage.js';
-import { migrateSong, sameChordStructure, readChordBeats } from './model.js';
+import { migrateSong, sameChordStructure, readChordBeats, findDuplicateSongs } from './model.js';
 import { choiceDialog } from './ui/dialog.js';
-import { showLibraryScreen } from './ui/library.js';
+import { showLibraryScreen, formatDateIt } from './ui/library.js';
 import { showSongScreen, applyTheme, leaveSongScreen } from './ui/songview.js';
 
 const appRoot = document.getElementById('app');
 
-// Finds a song already in the library that comes from the same page (same source URL, or same
-// title and artist when there is no URL).
+// Songs already in the library that come from the same page (newest import first).
 function findExisting(song) {
-  const norm = (v) => String(v || '').trim().toLowerCase();
-  for (const entry of listSongs()) {
-    const stored = getSong(entry.id);
-    if (!stored) continue;
-    const url = stored.source && stored.source.url;
-    if (song.source.url && url) {
-      if (url === song.source.url) return stored;
-    } else if (norm(stored.title) === norm(song.title) && norm(stored.artist) === norm(song.artist)) {
-      return stored;
-    }
-  }
-  return null;
+  return findDuplicateSongs(song, listSongs().map((e) => getSong(e.id)));
 }
 
 // Replacing keeps id, view, edited tempos and (if the chord structure is identical) the durations.
@@ -55,21 +43,25 @@ async function importSongFile(file) {
   song.view.theme = dark ? 'dark' : 'light';
   let toSave = song;
   let note = '';
-  const existing = findExisting(song);
-  if (existing) {
+  const copies = findExisting(song);
+  if (copies.length) {
+    const many = copies.length > 1;
+    const label = (c) => `«${c.title}» importato il ${formatDateIt(c.source && c.source.importedAt) || '?'}`;
     const choice = await choiceDialog({
       title: 'Questo brano è già in libreria',
-      message: `«${existing.title}» è già stato importato. Cosa vuoi fare?`,
+      message: many
+        ? `Ci sono ${copies.length} copie. Quale vuoi sostituire?`
+        : `«${copies[0].title}» è già stato importato. Cosa vuoi fare?`,
       buttons: [
-        { label: 'Sostituisci', value: 'replace', primary: true },
+        ...copies.map((c, i) => ({ label: many ? 'Sostituisci ' + label(c) : 'Sostituisci', value: 'replace:' + i, primary: i === 0 })),
         { label: 'Tieni entrambi', value: 'both' },
         { label: 'Annulla', value: 'cancel' },
       ],
       cancel: 'cancel',
     });
     if (choice === 'cancel') return;
-    if (choice === 'replace') {
-      const r = mergeIntoExisting(song, existing);
+    if (choice.startsWith('replace:')) {
+      const r = mergeIntoExisting(song, copies[Number(choice.slice(8))]);
       toSave = r.merged;
       if (!r.sameStructure && r.hadEdits) note = 'Gli accordi sono cambiati: le durate sono tornate predefinite.';
     }

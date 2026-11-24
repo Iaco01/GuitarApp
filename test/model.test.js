@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createSong, validateSong, migrateSong, countChords, sectionSignature, sectionContentKey, baseSectionName, listChordNames, proposeSectionTempos, effectiveSectionBpms, applySectionTempos } from '../src/model.js';
+import { createSong, validateSong, migrateSong, countChords, sectionSignature, sectionContentKey, baseSectionName, listChordNames, proposeSectionTempos, effectiveSectionBpms, applySectionTempos, findDuplicateSongs } from '../src/model.js';
 
 const sample = () => createSong({
   title: 'T', artist: 'A',
@@ -106,4 +106,15 @@ test('validateSong requires integer beats >= 1 and sane section bpm', () => {
   s.sections[0].lines[0].chords[0].beats = 1.5;
   s.sections[1].bpm = -3;
   assert.equal(validateSong(s).errors.length, 2);
+});
+
+test('findDuplicateSongs matches by URL or title+artist, newest import first', () => {
+  const mk = (o) => createSong({ source: { fileName: '', importedAt: o.at, url: o.url }, title: o.t || 'T', artist: 'A' });
+  const fresh = mk({ at: '2026-03-01', url: 'u1' });
+  const a = mk({ at: '2026-01-01', url: 'u1' });
+  const b = mk({ at: '2026-02-01', url: 'u1' });
+  const c = mk({ at: '2026-02-15', url: 'u2' });
+  assert.deepEqual(findDuplicateSongs(fresh, [a, c, b, null]).map((s) => s.id), [b.id, a.id]);
+  const noUrl = createSong({ title: ' t ', artist: 'a' });
+  assert.equal(findDuplicateSongs(noUrl, [a, c]).length, 2);
 });
