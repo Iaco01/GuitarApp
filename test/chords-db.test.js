@@ -18,7 +18,7 @@ const TUNING = [4, 9, 2, 7, 11, 4]; // E A D G B E
 const TONES = {
   '': [0, 4, 7], m: [0, 3, 7], 7: [0, 4, 7, 10], m7: [0, 3, 7, 10], maj7: [0, 4, 7, 11], sus2: [0, 2, 7], sus4: [0, 5, 7],
   add9: [0, 4, 7, 2], 6: [0, 4, 7, 9], m6: [0, 3, 7, 9], 9: [0, 4, 7, 10, 2], m7b5: [0, 3, 6, 10], dim7: [0, 3, 6, 9],
-  dim: [0, 3, 6], '7sus4': [0, 5, 7, 10], 5: [0, 7],
+  dim: [0, 3, 6], '7sus4': [0, 5, 7, 10], 5: [0, 7], aug: [0, 4, 8], m9: [0, 3, 7, 10, 2],
 };
 const ROOTS = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
 
@@ -66,7 +66,7 @@ test('every shape of every root x quality has valid frets and only chord notes',
 
 test('every root has a shape for the required qualities', () => {
   for (const r of ROOTS) {
-    for (const q of ['', 'm', '7', 'm7', 'maj7', 'sus4', 'sus2', 'm7b5', 'dim7', '6', 'm6', '9']) {
+    for (const q of ['', 'm', '7', 'm7', 'maj7', 'sus4', 'sus2', 'm7b5', 'dim7', '6', 'm6', '9', 'aug', 'add9']) {
       assert.ok(getChordShape(r + q), r + q);
     }
   }
@@ -86,6 +86,16 @@ test('hand-written open shapes exist and are sensible', () => {
     assert.equal(playedPcs(s).find((p) => p !== null), PC[c.bass], `${n}: bass is the lowest note`);
     assert.equal(s.bass, undefined, `${n} is a table entry`);
   }
+});
+
+test('aug, add9 and m9 shapes also exist off the open position', () => {
+  for (const r of ROOTS) {
+    assert.ok(getChordShape(r + 'aug'), r + 'aug');
+    assert.ok(getChordShape(r + 'add9'), r + 'add9');
+    assert.ok(getChordShape(r + 'm9'), r + 'm9');
+  }
+  assert.ok(getChordShape('Dadd9') && getChordShape('Fadd9') && getChordShape('F#add9'));
+  assert.equal(getChordShape('Faug').barres[0].fret, 1);
 });
 
 test('barre choice and enharmonics', () => {
