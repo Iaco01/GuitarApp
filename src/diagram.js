@@ -8,6 +8,8 @@ const DG_ROW_H = 17;
 const DG_ROWS = 5;
 const DG_TOP = 34; // top of the grid (without label)
 const DG_LABEL_H = 20;
+const DG_SMALL_BELOW = 48; // px width under which the fret number moves below the grid
+const DG_MIN_NUM_PX = 10;
 
 function dgNum(n) {
   return String(Math.round(n * 100) / 100);
@@ -22,7 +24,11 @@ function dgEscape(text) {
 export function renderDiagramSvg(shape, { size = 64, label = '', theme = '' } = {}) {
   const top = DG_TOP + (label ? DG_LABEL_H : 0);
   const gridH = DG_ROWS * DG_ROW_H;
-  const height = top + gridH + 8;
+  // below 48 px the fret number would be unreadable inside the grid margin: it is drawn under the
+  // diagram ("5fr") with a font that renders at 10 px at least
+  const small = size < DG_SMALL_BELOW && shape.baseFret > 1;
+  const numPx = Math.max(19, (DG_MIN_NUM_PX * DG_W) / size);
+  const height = top + gridH + 8 + (small ? numPx + 2 : 0);
   const sx = (i) => DG_GRID_X + i * DG_STRING_GAP;
   const rowY = (fret) => top + (fret - shape.baseFret + 0.5) * DG_ROW_H;
   const parts = [];
@@ -41,7 +47,11 @@ export function renderDiagramSvg(shape, { size = 64, label = '', theme = '' } = 
   for (let i = 0; i < 6; i++) {
     parts.push(`<line x1="${dgNum(sx(i))}" y1="${top}" x2="${dgNum(sx(i))}" y2="${top + gridH}" stroke="currentColor" stroke-width="1.4" opacity="0.75"/>`);
   }
-  if (shape.baseFret > 1) {
+  if (small) {
+    const y = top + gridH + 6 + numPx * 0.8;
+    parts.push(`<text x="${DG_W / 2 + 2}" y="${dgNum(y)}" text-anchor="end" font-size="${dgNum(numPx)}" font-weight="700" fill="currentColor" font-family="system-ui,sans-serif">${shape.baseFret}</text>`);
+    parts.push(`<text x="${DG_W / 2 + 4}" y="${dgNum(y)}" text-anchor="start" font-size="${dgNum(numPx * 0.7)}" font-weight="700" fill="currentColor" font-family="system-ui,sans-serif">fr</text>`);
+  } else if (shape.baseFret > 1) {
     parts.push(`<text x="${left - 9}" y="${dgNum(top + DG_ROW_H * 0.5 + 6)}" text-anchor="end" font-size="19" font-weight="700" fill="currentColor" font-family="system-ui,sans-serif">${shape.baseFret}</text>`);
   }
   // barres

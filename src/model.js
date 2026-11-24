@@ -37,6 +37,10 @@ export function createSong(partial = {}) {
   };
 }
 
+const BPM_LIMITS = [20, 400];
+const TS_DENOMINATORS = [2, 4, 8, 16];
+const validBpm = (v) => typeof v === 'number' && Number.isFinite(v) && v >= BPM_LIMITS[0] && v <= BPM_LIMITS[1];
+
 export function validateSong(obj) {
   const errors = [];
   const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -44,8 +48,13 @@ export function validateSong(obj) {
   if (typeof obj.id !== 'string' || !obj.id) errors.push('id mancante');
   if (typeof obj.title !== 'string') errors.push('title deve essere una stringa');
   if (typeof obj.artist !== 'string') errors.push('artist deve essere una stringa');
-  if (obj.bpm !== null && !(typeof obj.bpm === 'number' && obj.bpm > 0)) errors.push('bpm non valido');
-  if (!Array.isArray(obj.timeSignature) || obj.timeSignature.length !== 2) errors.push('timeSignature non valida');
+  if (obj.bpm !== null && obj.bpm !== undefined && !validBpm(obj.bpm)) errors.push(`bpm non valido (${BPM_LIMITS[0]}–${BPM_LIMITS[1]})`);
+  const ts = obj.timeSignature;
+  if (!Array.isArray(ts) || ts.length !== 2 || !Number.isInteger(ts[0]) || ts[0] < 1 || ts[0] > 16 || !TS_DENOMINATORS.includes(ts[1])) {
+    errors.push('timeSignature non valida (numeratore 1–16, denominatore 2, 4, 8 o 16)');
+  }
+  if (obj.transpose !== undefined && !(Number.isInteger(obj.transpose) && Math.abs(obj.transpose) <= 12)) errors.push('transpose non valido (intero tra −12 e +12)');
+  if (obj.capo !== undefined && !(Number.isInteger(obj.capo) && obj.capo >= 0 && obj.capo <= 12)) errors.push('capo non valido (intero tra 0 e 12)');
   if (!Array.isArray(obj.chords)) errors.push('chords deve essere un array');
   if (!Array.isArray(obj.strumming)) errors.push('strumming deve essere un array');
   if (!Array.isArray(obj.sections)) {
@@ -61,9 +70,9 @@ export function validateSong(obj) {
           errors.push(`riga ${si}.${li} non valida`);
           return;
         }
-        if (s.bpm !== undefined && s.bpm !== null && !(typeof s.bpm === 'number' && s.bpm > 0)) errors.push(`bpm della sezione ${si} non valido`);
+        if (s.bpm !== undefined && s.bpm !== null && !validBpm(s.bpm)) errors.push(`bpm della sezione ${si} non valido (${BPM_LIMITS[0]}–${BPM_LIMITS[1]})`);
         l.chords.forEach((c, ci) => {
-          if (!isObj(c) || typeof c.name !== 'string' || !Number.isInteger(c.col) || c.col < 0 || !Number.isInteger(c.beats) || c.beats < 1) {
+          if (!isObj(c) || typeof c.name !== 'string' || !Number.isInteger(c.col) || c.col < 0 || !Number.isInteger(c.beats) || c.beats < 1 || c.beats > 64) {
             errors.push(`accordo ${si}.${li}.${ci} non valido`);
           }
         });
