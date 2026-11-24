@@ -52,3 +52,11 @@ test('helpers: counts, names, signatures', () => {
   s.sections[1].lines[0].lyric = 'x z';
   assert.notEqual(sectionContentKey(s.sections[0]), sectionContentKey(s.sections[1]));
 });
+
+test('groupRepeatedSections merges consecutive copies and flags later repeats', async () => {
+  const { groupRepeatedSections } = await import('../src/model.js');
+  const sec = (name, lyric) => ({ name, lines: [{ lyric, chords: [{ name: 'G', col: 0, beats: 4 }] }] });
+  const groups = groupRepeatedSections([sec('Chorus', 'a'), sec('Chorus 2', 'a'), sec('Verse 1', 'b'), sec('Chorus', 'a'), sec('Verse 2', 'c')]);
+  assert.deepEqual(groups.map((g) => [g.indices.join('+'), g.count, g.repeat]),
+    [['0+1', 2, false], ['2', 1, false], ['3', 1, true], ['4', 1, false]]);
+});

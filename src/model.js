@@ -115,3 +115,25 @@ export function sectionContentKey(section) {
 export function baseSectionName(name) {
   return name.replace(/\s*\d+\s*$/, '').trim();
 }
+
+// Groups consecutive identical sections ("Chorus (x2)") and flags groups whose content already
+// appeared earlier (`repeat: true`). Each group: { key, section, indices, count, repeat }.
+export function groupRepeatedSections(sections) {
+  const groups = [];
+  sections.forEach((section, index) => {
+    const key = sectionContentKey(section);
+    const last = groups[groups.length - 1];
+    if (last && last.key === key) {
+      last.count++;
+      last.indices.push(index);
+    } else {
+      groups.push({ key, section, indices: [index], count: 1, repeat: false });
+    }
+  });
+  const seen = new Set();
+  for (const g of groups) {
+    g.repeat = seen.has(g.key);
+    seen.add(g.key);
+  }
+  return groups;
+}
