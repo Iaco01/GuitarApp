@@ -1,5 +1,7 @@
 // Library storage on top of localStorage (injectable for tests).
 
+import { countBars } from './model.js';
+
 const KEY_INDEX = 'gapp.index.v1';
 const KEY_SETTINGS = 'gapp.settings.v1';
 const KEY_SONG_PREFIX = 'gapp.song.';
@@ -38,15 +40,19 @@ function writeJson(st, key, value) {
   }
 }
 
-function indexEntry(song) {
-  return {
+function indexEntry(song, openedAt) {
+  const entry = {
     id: song.id,
     title: song.title,
     artist: song.artist,
     difficulty: song.difficulty,
     importedAt: song.source ? song.source.importedAt : song.updatedAt,
     updatedAt: song.updatedAt,
+    timingSource: song.timingSource || 'default',
+    bars: Array.isArray(song.sections) ? countBars(song) : 0,
   };
+  if (openedAt) entry.openedAt = openedAt;
+  return entry;
 }
 
 export function listSongs(storage) {
@@ -65,11 +71,68 @@ export function getSong(id, storage) {
 export function saveSong(song, storage) {
   const st = needStorage(storage);
   const saved = { ...song, updatedAt: new Date().toISOString() };
-  writeJson(st, KEY_SONG_PREFIX + saved.id, saved);
-  const idx = listSongs(st).filter((e) => e.id !== saved.id);
-  idx.unshift(indexEntry(saved));
+  return putSong(saved, st);
+}
+
+// Writes the song exactly as given (updatedAt kept: used by the JSON import) and updates the index.
+export function putSong(song, storage) {
+  const st = needStorage(storage);
+  writeJson(st, KEY_SONG_PREFIX + song.id, song);
+  const all = listSongs(st);
+  const old = all.find((e) => e.id === song.id);
+  const idx = all.filter((e) => e.id !== song.id);
+  idx.unshift(indexEntry(song, old && old.openedAt));
   writeJson(st, KEY_INDEX, idx);
-  return saved;
+  return song;
+}
+
+// Remembers when a song was last opened (index only: the song itself is not rewritten).
+export function markOpened(id, storage) {
+  const st = storage || defaultStorage();
+  if (!st) return;
+  try {
+    const idx = listSongs(st);
+    const e = idx.find((x) => x.id === id);
+    if (!e) return;
+    e.openedAt = new Date().toISOString();
+    writeJson(st, KEY_INDEX, idx);
+  } catch { /* the library still works without it */ }
+}
+
+// Index entries, completing the fields added after round 2 (bars, timingSource) from the songs.
+export function listLibrary(storage) {
+  const st = storage || defaultStorage();
+  const idx = listSongs(st);
+  let dirty = false;
+  const out = idx.map((e) => {
+    if (e.bars !== undefined && e.timingSource !== undefined) return e;
+    const song = getSong(e.id, st);
+    if (!song) return e;
+    dirty = true;
+    return { ...indexEntry(song, e.openedAt), ...e, bars: countBars(song), timingSource: song.timingSource || 'default' };
+  });
+  if (dirty) {
+    try { writeJson(st, KEY_INDEX, out); } catch { /* ignore */ }
+  }
+  return out;
+}
+
+// Estimated space used by the library in localStorage, in bytes (two bytes per character).
+export function storageUsedBytes(storage) {
+  const st = storage || defaultStorage();
+  if (!st) return 0;
+  let chars = 0;
+  const len = (key) => {
+    try {
+      const v = st.getItem(key);
+      return v ? v.length : 0;
+    } catch {
+      return 0;
+    }
+  };
+  chars += len(KEY_INDEX) + len(KEY_SETTINGS);
+  for (const e of listSongs(st)) chars += len(KEY_SONG_PREFIX + e.id);
+  return chars * 2;
 }
 
 export function deleteSong(id, storage) {

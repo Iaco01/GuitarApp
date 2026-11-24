@@ -41,7 +41,7 @@ test('index entries carry the library fields only', () => {
   const st = fakeStorage();
   const a = createSong({ title: 'A', artist: 'x', difficulty: 'Beginner' });
   saveSong(a, st);
-  assert.deepEqual(Object.keys(listSongs(st)[0]).sort(), ['artist', 'difficulty', 'id', 'importedAt', 'title', 'updatedAt']);
+  assert.deepEqual(Object.keys(listSongs(st)[0]).sort(), ['artist', 'bars', 'difficulty', 'id', 'importedAt', 'timingSource', 'title', 'updatedAt']);
 });
 
 test('quota errors become a clear message', () => {

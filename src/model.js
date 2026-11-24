@@ -257,3 +257,15 @@ export function findDuplicateSongs(song, stored) {
   const when = (s) => (s.source && s.source.importedAt) || s.updatedAt || '';
   return out.sort((a, b) => (when(a) < when(b) ? 1 : when(a) > when(b) ? -1 : 0));
 }
+
+// Total length in beats and in bars (rounded) of the chord sequence.
+export function countBeats(song) {
+  let n = 0;
+  for (const s of song.sections) for (const l of s.lines) for (const c of l.chords) n += Number.isInteger(c.beats) ? c.beats : 1;
+  return n;
+}
+
+export function countBars(song) {
+  const perBar = Math.max(1, (song.timeSignature && song.timeSignature[0]) || 4);
+  return Math.round(countBeats(song) / perBar);
+}

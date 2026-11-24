@@ -9,7 +9,7 @@ Web app statica per telefono: importa una pagina Ultimate Guitar salvata (.mht),
 
 - Zero dipendenze npm (né runtime né dev). Solo moduli ES in `src/`, build con `node scripts/build.mjs` → `dist/index.html`.
 - Convenzioni dei moduli (servono alla build): solo `import { a } from './x.js'` su una riga, solo `export function|const|class`, niente `export default`, niente `import *`, nomi top-level univoci tra tutti i moduli.
-- I moduli puri (`html-text`, `mht`, `parser`, `chord`, `model`, `timeline`, `transpose`, `chords-db`, `diagram`) non toccano DOM né `window`: devono girare in Node.
+- I moduli puri (`html-text`, `mht`, `parser`, `chord`, `model`, `timeline`, `transpose`, `chords-db`, `diagram`, `libio`) non toccano DOM né `window`: devono girare in Node.
 - Test: `npm test` (`node --test "test/*.test.js"`; `node --test test/` non funziona su Node 22). Deve restare verde a ogni commit.
 - UI in italiano; codice, commenti e messaggi di commit in inglese.
 - **Copyright**: `test/fixtures/local/` contiene una pagina reale con testo protetto. Mai copiarne il testo in file versionati, test, fixture sintetiche, report o screenshot committati. Le asserzioni sul file reale usano conteggi e nomi di sezione.
