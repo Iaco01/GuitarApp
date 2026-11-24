@@ -390,11 +390,13 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
   };
 
   // ---- playback highlight ----
-  function applyEvent(i, counting) {
+  // `startEvent` >= 0 while counting in: nothing is current yet, that chord is the next one.
+  function applyEvent(i, startEvent) {
+    const counting = startEvent >= 0;
     if (curEl) curEl.classList.remove('cur');
     if (nextEl) nextEl.classList.remove('next');
-    curEl = i >= 0 ? evEl[i] : null;
-    nextEl = evEl[i + 1] || null;
+    curEl = !counting && i >= 0 ? evEl[i] : null;
+    nextEl = (counting ? evEl[startEvent] : evEl[i + 1]) || null;
     if (curEl) {
       curEl.classList.add('cur');
       curEl.style.setProperty('--p', '0');
@@ -440,14 +442,15 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
     const ev = info.eventIndex >= 0 ? timeline.events[info.eventIndex] : null;
     if (key !== lastKey) {
       lastKey = key;
-      const evKey = info.eventIndex + (info.state === 'counting' ? 'c' : '');
+      const evKey = info.eventIndex + (info.state === 'counting' ? 'c' + info.startEvent : '');
       if (evKey !== lastEvKey) {
         lastEvKey = evKey;
-        applyEvent(info.eventIndex, info.state === 'counting');
+        applyEvent(info.eventIndex, info.state === 'counting' ? info.startEvent : -1);
       }
-      const nextEvent = info.state === 'counting' ? timeline.events[0] : timeline.events[info.eventIndex + 1] || null;
+      const nextEvent = info.state === 'counting' ? timeline.events[info.startEvent] : timeline.events[info.eventIndex + 1] || null;
       const beat = info.beatIndex >= 0 ? timeline.beats[info.beatIndex] : null;
-      const secIdx = ev ? ev.sectionIndex : timeline.events[0] ? timeline.events[0].sectionIndex : 0;
+      const startEv = info.state === 'counting' ? timeline.events[info.startEvent] : ev || timeline.events[0];
+      const secIdx = startEv ? startEv.sectionIndex : 0;
       const section = song.sections[secIdx];
       const strum = section && section.strumIndex !== null && section.strumIndex !== undefined ? song.strumming[section.strumIndex] : null;
       let strumCell = -1;
@@ -462,7 +465,7 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
         nextEvent,
         beatsLeft: ev && beat ? ev.startBeat + ev.beats - beat.index : 0,
         beatInBar: info.state === 'counting' ? timeline.events.length ? perBarIndexFromCountdown(info.countdown) : -1 : beat ? beat.beatInBar : -1,
-        bpm: ev ? ev.bpm : timeline.sections[secIdx] ? timeline.sections[secIdx].bpm : 80,
+        bpm: timeline.sections[secIdx] ? timeline.sections[secIdx].bpm : 80,
         strum,
         strumId: section ? section.strumIndex : null,
         strumCell,

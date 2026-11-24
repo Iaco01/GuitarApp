@@ -102,6 +102,7 @@ export function createPlayer({ timeline, timeSignature = [4, 4], onFrame, onStat
       eventIndex: state === 'counting' ? -1 : eventIndexAtTime(tl, timeSec),
       beatIndex: state === 'counting' ? -1 : beatIndexAtTime(tl, timeSec),
       countdown,
+      startEvent: state === 'counting' ? Math.max(0, eventIndexAtTime(tl, offset)) : -1,
       loopSection,
     };
   }

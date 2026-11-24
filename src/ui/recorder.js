@@ -4,6 +4,7 @@
 import { domEl, domClear } from './dom.js';
 import { chordColorVar } from '../render.js';
 import { quantizeTaps } from '../taprecord.js';
+import { beatPositionAtTime } from '../timeline.js';
 
 // Opens the overlay. `span` = { firstEventIndex, eventCount, label }. `player` is the shared
 // player; `getTimeline()` returns the current timeline. `onSave(beats)` receives the new
@@ -61,7 +62,11 @@ export function openRecorder({ song, player, getTimeline, span, onSave, onClose 
 
   function onTap() {
     if (finished || player.getState() !== 'playing') return;
-    taps.push(player.currentTime());
+    const now = player.currentTime();
+    const prev = taps.length ? taps[taps.length - 1] : events[span.firstEventIndex].startSec;
+    // double tap (less than half a beat after the previous one): ignored, as in quantizeTaps
+    if (beatPositionAtTime(tl, now) - beatPositionAtTime(tl, prev) < 0.5) return;
+    taps.push(now);
     if (taps.length >= span.eventCount) finish(false);
     refresh();
   }

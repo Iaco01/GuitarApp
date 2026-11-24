@@ -29,3 +29,18 @@ Registro delle scelte che la spec non fissa. Formato: data, decisione, motivo. C
 - **BPM mancante**: la UI mostra "BPM non trovato" e un campo (30–300) salvato nel brano. Il default di riproduzione (80) è per il round 2.
 - **Storage**: `saveSong` aggiorna `updatedAt` e mette il brano in testa all'indice; le funzioni accettano uno storage iniettato come ultimo argomento.
 - **Il file reale non è UTF-8 valido** (contiene parti binarie): `file.text()` sostituisce i byte non validi con U+FFFD senza effetti sul brano.
+
+## Round 2 (implementatore)
+
+- **A capo solo sugli spazi**: ogni parola del testo con i suoi segmenti-accordo è un `span.w` nowrap; un accordo sopra uno spazio si ancora al primo spazio esistente (nessun segnaposto); un accordo oltre la fine del testo è un gruppo a sé. Nelle righe strumentali gli accordi sono separati da uno spazio. Nuova funzione pura `buildLineGroups` in `segments.js`.
+- **Linearità del parser**: le chiusure degli `<span>` di una riga si trovano in un solo passaggio con uno stack (`matchSpanEnds`). Uno span accordo con nome vuoto è ignorato (il suo testo resta testo) con un solo avviso per brano.
+- **`source.url`** salvato senza `_gl`, `_ga`, `gclid`, `fbclid`, `utm_*`. Reimport: duplicato se stesso URL (se entrambi lo hanno), altrimenti stesso titolo+artista. "Sostituisci" tiene durate e BPM modificati solo se la sequenza di nomi accordi per sezione/riga è identica; altrimenti avvisa (`alert`) solo se c'erano modifiche.
+- **Schema 2**: `section.bpm/bpmSource/strumIndex`; `view.beatsPerChord` (default 4). `migrateSong` da schema 1 applica la proposta di tempi. `validateSong` ora richiede `beats` intero ≥ 1. La proposta (`proposeSectionTempos`) usa il confronto senza maiuscole; la regola "onwards" parte dalla prima sezione col nome indicato. Un pattern senza BPM assegna il ritmo ma non il tempo.
+- **BPM efficace**: propaga in avanti solo il BPM della sezione precedente; non c'è propagazione all'indietro. `song.bpm` mancante → 80.
+- **"Applica a tutte le sezioni con lo stesso nome"** usa il nome identico (non il nome base), per non toccare Verse con tempi diversi. Nel riquadro unito "Chorus (×N)" il tempo mostrato è quello della prima sezione e la modifica vale per tutte quelle del gruppo.
+- **Riproduzione**: ogni avvio (anche da pausa e da tocco su accordo) ha il conteggio di una battuta; il giro del loop no. La partenza dal loop da fermo ha il conteggio, poi il loop ripete senza. Il tocco su un accordo riparte da lì solo in riproduzione/pausa; da fermo apre ancora il foglio dell'accordo (aggancio per il round 3). Il tempo di visualizzazione compensa `outputLatency || baseLatency`.
+- **Cambio di durate/BPM/velocità durante il play**: la posizione si conserva in battiti frazionari (`beatPositionAtTime`/`timeAtBeatPosition`), non in secondi.
+- **Registrazione**: toccare entro mezzo battito dal tocco precedente, o arrotondare allo stesso battito, è un tocco doppio e si ignora (la spec dice "entro 1 battito", ma col jitter ±80 ms a 142 BPM un accordo di 1 battito sarebbe stato scartato). Gli accordi senza tocco tengono la durata attuale. L'ultimo accordo termina con il tocco successivo, con "Fine" o tiene la durata attuale. La registrazione si ferma da sola dopo tocchi pari al numero di accordi.
+- **Modalità modifica**: le sezioni sono rese una per una (senza fondere i "×N" né comprimere), così ogni accordo è modificabile. Il controllo −/+ è nella barra in basso (al posto del pannello di riproduzione).
+- **Tema**: pulsante con icona SVG sole/luna da 24 px e testo "Chiaro"/"Scuro".
+- **Tap tempo** modifica il BPM della sezione corrente (o della prima se fermo), arrotondato all'intero tra 30 e 300.

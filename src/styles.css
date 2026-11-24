@@ -229,3 +229,22 @@ h1, h2, h3, p, ul, ol, dl, dd { margin: 0; }
 .dlg { justify-items: stretch; }
 .dlg-title { font-size: 18px; }
 .dlg-btns { display: grid; gap: 8px; }
+
+/* compact panel */
+.playpanel { gap: 4px; padding-top: 6px; }
+.pp-cur-name { font-size: 28px; min-height: 32px; }
+.pp-mid { gap: 10px; flex-wrap: nowrap; }
+.pp-info { flex-wrap: nowrap; overflow: hidden; }
+.pp-ctrl { gap: 4px; }
+.pp-ctrl .btn { min-height: 40px; padding: 0 10px; font-size: 14px; }
+.pp-ctrl .btn.icon { min-width: 40px; padding: 0; }
+.pp-play { min-width: 70px; }
+
+.playpanel { width: 100%; min-width: 0; }
+.pp-top { min-width: 0; }
+.pp-mid { flex-wrap: wrap; gap: 4px 10px; min-width: 0; }
+.pp-info { flex-wrap: wrap; gap: 4px 10px; min-width: 0; overflow: visible; }
+.pp-bpm { white-space: nowrap; }
+.pp-pat { flex-wrap: nowrap; max-width: 100%; }
+.pp-cell { min-width: 11px; font-size: 12px; }
+.pp-next { min-width: 0; }
