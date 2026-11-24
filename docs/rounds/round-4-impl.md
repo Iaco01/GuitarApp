@@ -64,4 +64,13 @@ Come i round precedenti. In più, nel report: una sezione "Come provarlo sul tel
 
 ## Correzioni dal round 3
 
-(da completare dopo il report del tester)
+Dal report `docs/reports/round-3-test.md` (numeri = bug del tester). Tutti minori, ma da chiudere prima dell'audio.
+
+1. **Spazio in play su schermi bassi** (iPhone 13 a scala 1,5: 4 righe intere; iPhone SE 2): quando l'altezza visibile è < 700 px, i diagrammi piccoli nel pannello si nascondono di default (attivabili dal "⋯") e l'avviso schermo, una volta chiuso, non torna per quel brano. Obiettivo misurato: ≥ 5 righe intere su iPhone 13 a scala 1,5 in almeno 8 posizioni su 9 del tester (`test/e2e/` contiene la sua misura).
+2. **Numero del tasto illeggibile nei diagrammi piccoli** (5,7 px a 30 px): sotto i 48 px il numero del tasto si disegna fuori dalla griglia con dimensione minima 10 px, oppure si sostituisce con "5fr" sotto il diagramma. Il test `todo` del tester deve passare senza `todo`.
+3. **"Sostituisci" con copie dello stesso giorno**: etichette identiche. Usa data **e ora** di import e, se ancora uguali, "(copia 1)", "(copia 2)".
+4. **Reimport .mht con "Sostituisci"** azzera transpose e capo ma tiene `showShapes`: conserva tutti e tre (transpose, capo, showShapes), coerente con le altre impostazioni conservate.
+5. **Validazione import JSON**: `validateSong` deve controllare anche `timeSignature` (interi, numeratore 1–16, denominatore 2/4/8/16), `transpose` (intero −11…+11), `capo` (intero 0–12), `beats` (intero 1–64), BPM (20–400). Valori fuori range → brano rifiutato con errore leggibile. I 2 test `todo` del tester devono passare.
+6. **Capotasto libero**: oltre alle 3 opzioni suggerite, un selettore 0–12 nel foglio capotasto.
+7. **Forme mancanti** segnalate: aggiungi aug e add9 (anche non aperti) e m9 ai modelli barré, con il controllo automatico delle note.
+8. **Script e2e vecchi**: aggiorna `test/e2e/ui-round1.cjs` e `test/e2e/round2.cjs` perché girino sull'interfaccia attuale (pannello "⋯", chip, dialogo di sostituzione), così restano utili come regressione. Non cambiare cosa misurano.
