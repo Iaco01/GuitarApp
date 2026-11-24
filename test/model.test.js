@@ -118,3 +118,33 @@ test('findDuplicateSongs matches by URL or title+artist, newest import first', (
   const noUrl = createSong({ title: ' t ', artist: 'a' });
   assert.equal(findDuplicateSongs(noUrl, [a, c]).length, 2);
 });
+
+test('labelCopies tells same-minute copies apart', async () => {
+  const { labelCopies } = await import('../src/model.js');
+  const mk = (iso) => ({ title: 'T', source: { importedAt: iso } });
+  const fmt = (iso) => iso.slice(0, 16);
+  const one = labelCopies([mk('2026-01-01T10:00:00Z'), mk('2026-01-01T11:00:00Z')], fmt);
+  assert.notEqual(one[0], one[1]);
+  assert.ok(!/copia/.test(one.join()));
+  const same = labelCopies([mk('2026-01-01T10:00:10Z'), mk('2026-01-01T10:00:50Z'), mk('2026-01-01T12:00:00Z')], fmt);
+  assert.match(same[0], /\(copia 1\)$/);
+  assert.match(same[1], /\(copia 2\)$/);
+  assert.ok(!/copia/.test(same[2]));
+});
+
+test('mergeIntoExisting keeps transpose, capo and showShapes', async () => {
+  const { mergeIntoExisting } = await import('../src/model.js');
+  const old = sample();
+  old.transpose = 3;
+  old.capo = 2;
+  old.view.showShapes = true;
+  old.view.fontScale = 1.4;
+  const fresh = sample();
+  const { merged, sameStructure } = mergeIntoExisting(fresh, old);
+  assert.equal(sameStructure, true);
+  assert.equal(merged.id, old.id);
+  assert.equal(merged.transpose, 3);
+  assert.equal(merged.capo, 2);
+  assert.equal(merged.view.showShapes, true);
+  assert.equal(merged.view.fontScale, 1.4);
+});

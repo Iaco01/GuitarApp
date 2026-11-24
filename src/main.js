@@ -2,9 +2,9 @@
 
 import { parseSongFromMht } from './parser.js';
 import { getSong, saveSong, listSongs, markOpened } from './storage.js';
-import { migrateSong, sameChordStructure, readChordBeats, findDuplicateSongs } from './model.js';
+import { migrateSong, mergeIntoExisting, findDuplicateSongs, labelCopies } from './model.js';
 import { choiceDialog } from './ui/dialog.js';
-import { showLibraryScreen, formatDateIt } from './ui/library.js';
+import { showLibraryScreen, formatDateTimeIt } from './ui/library.js';
 import { showSongScreen, applyTheme, leaveSongScreen } from './ui/songview.js';
 
 const appRoot = document.getElementById('app');
@@ -12,27 +12,6 @@ const appRoot = document.getElementById('app');
 // Songs already in the library that come from the same page (newest import first).
 function findExisting(song) {
   return findDuplicateSongs(song, listSongs().map((e) => getSong(e.id)));
-}
-
-// Replacing keeps id, view, edited tempos and (if the chord structure is identical) the durations.
-function mergeIntoExisting(fresh, old) {
-  const oldSong = migrateSong(old);
-  const sameStructure = sameChordStructure(oldSong, fresh);
-  const merged = { ...fresh, id: oldSong.id, view: { ...fresh.view, ...oldSong.view }, source: { ...fresh.source, importedAt: oldSong.source.importedAt } };
-  if (sameStructure) {
-    const beats = readChordBeats(oldSong);
-    let k = 0;
-    for (const sec of merged.sections) for (const l of sec.lines) for (const c of l.chords) c.beats = beats[k++];
-    merged.timingSource = oldSong.timingSource;
-    merged.sections.forEach((sec, i) => {
-      if (oldSong.sections[i].bpmSource === 'edited') {
-        sec.bpm = oldSong.sections[i].bpm;
-        sec.bpmSource = 'edited';
-      }
-    });
-    if (oldSong.bpm) merged.bpm = oldSong.bpm;
-  }
-  return { merged, sameStructure, hadEdits: oldSong.timingSource !== 'default' };
 }
 
 async function importSongFile(file) {
@@ -46,14 +25,14 @@ async function importSongFile(file) {
   const copies = findExisting(song);
   if (copies.length) {
     const many = copies.length > 1;
-    const label = (c) => `«${c.title}» importato il ${formatDateIt(c.source && c.source.importedAt) || '?'}`;
+    const labels = labelCopies(copies, formatDateTimeIt);
     const choice = await choiceDialog({
       title: 'Questo brano è già in libreria',
       message: many
         ? `Ci sono ${copies.length} copie. Quale vuoi sostituire?`
         : `«${copies[0].title}» è già stato importato. Cosa vuoi fare?`,
       buttons: [
-        ...copies.map((c, i) => ({ label: many ? 'Sostituisci ' + label(c) : 'Sostituisci', value: 'replace:' + i, primary: i === 0 })),
+        ...copies.map((c, i) => ({ label: many ? 'Sostituisci ' + labels[i] : 'Sostituisci', value: 'replace:' + i, primary: i === 0 })),
         { label: 'Tieni entrambi', value: 'both' },
         { label: 'Annulla', value: 'cancel' },
       ],

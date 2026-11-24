@@ -278,3 +278,41 @@ export function countBars(song) {
   const perBar = Math.max(1, (song.timeSignature && song.timeSignature[0]) || 4);
   return Math.round(countBeats(song) / perBar);
 }
+
+// Labels that tell duplicate copies apart: «title» importato il <when>, plus "(copia N)" for copies
+// whose label would still be identical. `formatWhen(iso)` gives date and time.
+export function labelCopies(copies, formatWhen) {
+  const base = copies.map((c) => `«${c.title}» importato il ${formatWhen(c.source && c.source.importedAt) || '?'}`);
+  const total = new Map();
+  for (const b of base) total.set(b, (total.get(b) || 0) + 1);
+  const seen = new Map();
+  return base.map((b) => {
+    if (total.get(b) === 1) return b;
+    const n = (seen.get(b) || 0) + 1;
+    seen.set(b, n);
+    return `${b} (copia ${n})`;
+  });
+}
+
+// Replacing keeps id, view (incl. showShapes), transpose, capo, audio, edited tempos and (if the
+// chord structure is identical) the durations.
+export function mergeIntoExisting(fresh, old) {
+  const oldSong = migrateSong(old);
+  const sameStructure = sameChordStructure(oldSong, fresh);
+  const merged = { ...fresh, id: oldSong.id, view: { ...fresh.view, ...oldSong.view }, source: { ...fresh.source, importedAt: oldSong.source.importedAt },
+    transpose: oldSong.transpose || 0, capo: oldSong.capo || 0, audio: oldSong.audio || null };
+  if (sameStructure) {
+    const beats = readChordBeats(oldSong);
+    let k = 0;
+    for (const sec of merged.sections) for (const l of sec.lines) for (const c of l.chords) c.beats = beats[k++];
+    merged.timingSource = oldSong.timingSource;
+    merged.sections.forEach((sec, i) => {
+      if (oldSong.sections[i].bpmSource === 'edited') {
+        sec.bpm = oldSong.sections[i].bpm;
+        sec.bpmSource = 'edited';
+      }
+    });
+    if (oldSong.bpm) merged.bpm = oldSong.bpm;
+  }
+  return { merged, sameStructure, hadEdits: oldSong.timingSource !== 'default' };
+}

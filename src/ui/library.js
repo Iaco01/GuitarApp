@@ -13,6 +13,13 @@ export function formatDateIt(iso) {
   return `${d.getDate()} ${MONTHS_IT[d.getMonth()]} ${d.getFullYear()}`;
 }
 
+export function formatDateTimeIt(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const p = (n) => String(n).padStart(2, '0');
+  return `${formatDateIt(iso)} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
 function formatKb(bytes) {
   const kb = bytes / 1024;
   return kb < 10 ? kb.toFixed(1).replace('.', ',') + ' KB' : Math.round(kb) + ' KB';
