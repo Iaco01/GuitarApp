@@ -66,6 +66,8 @@ export function createPlayer({ timeline, timeSignature = [4, 4], onFrame, onStat
   let raf = 0;
   let wakeLock = null;
   let wakeWarned = false;
+  let wakeWanted = false;
+  let wakePending = false;
   let countSpb = 0.5;
   let countBeats = timeSignature[0] || 4;
   let destroyed = false;
@@ -186,15 +188,27 @@ export function createPlayer({ timeline, timeSignature = [4, 4], onFrame, onStat
       }
       return;
     }
+    wakeWanted = true;
+    if (wakeLock || wakePending) return;
+    wakePending = true;
     try {
-      if (!wakeLock) wakeLock = await navigator.wakeLock.request('screen');
-      wakeLock.addEventListener('release', () => { wakeLock = null; });
+      const lock = await navigator.wakeLock.request('screen');
+      if (!wakeWanted || destroyed) {
+        // paused or stopped while the request was pending: give the lock back at once
+        try { lock.release(); } catch { /* ignore */ }
+      } else {
+        wakeLock = lock;
+        lock.addEventListener('release', () => { if (wakeLock === lock) wakeLock = null; });
+      }
     } catch {
       wakeLock = null;
+    } finally {
+      wakePending = false;
     }
   }
 
   function releaseWake() {
+    wakeWanted = false;
     if (wakeLock) {
       try { wakeLock.release(); } catch { /* ignore */ }
       wakeLock = null;

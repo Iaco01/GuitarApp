@@ -1,17 +1,16 @@
-// Reproductions of bugs found by the round 2 tester. Marked `todo`: NOT part of `npm test`
-// (glob test/*.test.js). Run: node --test "test/regression/*.test.js"
+// Regression: pausing before the wake lock request is granted must not leave the lock held.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createPlayer } from '../../src/player.js';
-import { buildTimeline } from '../../src/timeline.js';
-import { createSong } from '../../src/model.js';
+import { createPlayer } from '../src/player.js';
+import { buildTimeline } from '../src/timeline.js';
+import { createSong } from '../src/model.js';
 
 const song = createSong({
   bpm: 120,
   sections: [{ name: 'A', bpm: 120, bpmSource: 'edited', strumIndex: null, lines: [{ lyric: 'x', chords: [{ name: 'G', col: 0, beats: 4 }, { name: 'D', col: 1, beats: 4 }] }] }],
 });
 
-test('bug W1: pausing before the wake lock is granted leaves the lock held', { todo: 'bug W1' }, async () => {
+test('bug W1: pausing before the wake lock is granted leaves the lock held', async () => {
   let active = 0;
   Object.defineProperty(globalThis, 'navigator', {
     configurable: true,
