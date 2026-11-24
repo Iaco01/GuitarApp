@@ -1,6 +1,7 @@
 // Song model: creation, validation, migration and small helpers (pure).
 
-export const SONG_SCHEMA_VERSION = 1;
+export const SONG_SCHEMA_VERSION = 2;
+export const DEFAULT_BPM = 80;
 
 function modelUuid() {
   if (globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function') {
@@ -60,8 +61,9 @@ export function validateSong(obj) {
           errors.push(`riga ${si}.${li} non valida`);
           return;
         }
+        if (s.bpm !== undefined && s.bpm !== null && !(typeof s.bpm === 'number' && s.bpm > 0)) errors.push(`bpm della sezione ${si} non valido`);
         l.chords.forEach((c, ci) => {
-          if (!isObj(c) || typeof c.name !== 'string' || !Number.isInteger(c.col) || c.col < 0 || !(c.beats > 0)) {
+          if (!isObj(c) || typeof c.name !== 'string' || !Number.isInteger(c.col) || c.col < 0 || !Number.isInteger(c.beats) || c.beats < 1) {
             errors.push(`accordo ${si}.${li}.${ci} non valido`);
           }
         });
@@ -72,14 +74,118 @@ export function validateSong(obj) {
 }
 
 // Fills in missing fields so that older or hand-edited objects load safely.
+// Schema 1 -> 2: sections gain bpm/bpmSource/strumIndex and get the tempo proposed from the
+// strumming patterns.
 export function migrateSong(obj) {
   const base = createSong({ id: obj && obj.id ? obj.id : undefined });
   const merged = { ...base, ...obj };
   merged.view = { ...base.view, ...(obj && obj.view ? obj.view : {}) };
   merged.source = { ...base.source, ...(obj && obj.source ? obj.source : {}) };
   merged.importInfo = { ...base.importInfo, ...(obj && obj.importInfo ? obj.importInfo : {}) };
+  const oldVersion = obj && Number.isInteger(obj.schemaVersion) ? obj.schemaVersion : 1;
   merged.schemaVersion = SONG_SCHEMA_VERSION;
+  if (Array.isArray(merged.sections)) {
+    merged.sections = merged.sections.map((sec) => ({
+      ...sec,
+      bpm: sec.bpm === undefined ? null : sec.bpm,
+      bpmSource: sec.bpmSource === undefined ? null : sec.bpmSource,
+      strumIndex: sec.strumIndex === undefined ? null : sec.strumIndex,
+    }));
+    if (oldVersion < 2) applySectionTempos(merged);
+  }
   return merged;
+}
+
+const ONWARDS_RE = /^(.*?)\s+on(?:wards)?$/i;
+const norm = (str) => String(str).trim().replace(/\s+/g, ' ').toLowerCase();
+
+// Proposes a tempo and a rhythm pattern for every section from the Ultimate Guitar strumming
+// patterns (pure). Returns [{ bpm: number|null, strumIndex: number|null }] (one per section).
+// Rules, most specific first: 1) pattern named like the section ("Verse 1"); 2) pattern named
+// like its base name ("Chorus"); 3) "<Name> onwards" / "<Name> on": that section and all the
+// following ones not already covered by 1 or 2.
+export function proposeSectionTempos(song) {
+  const pats = song.strumming || [];
+  const out = song.sections.map(() => ({ rule: 0, strumIndex: null }));
+  const put = (i, rule, idx) => {
+    if (out[i].rule === 0 || rule < out[i].rule) out[i] = { rule, strumIndex: idx };
+  };
+  song.sections.forEach((sec, i) => {
+    const full = norm(sec.name);
+    const base = norm(baseSectionName(sec.name));
+    const r1 = pats.findIndex((p) => norm(p.section) === full);
+    if (r1 !== -1) return put(i, 1, r1);
+    const r2 = pats.findIndex((p) => norm(p.section) === base);
+    if (r2 !== -1) put(i, 2, r2);
+  });
+  const onsets = [];
+  pats.forEach((p, idx) => {
+    const m = ONWARDS_RE.exec(String(p.section).trim());
+    if (!m) return;
+    const start = song.sections.findIndex((sec) => norm(sec.name) === norm(m[1]));
+    if (start !== -1) onsets.push({ start, idx });
+  });
+  onsets.sort((a, b) => a.start - b.start);
+  for (let i = 0; i < out.length; i++) {
+    if (out[i].rule !== 0) continue;
+    let pick = null;
+    for (const o of onsets) if (o.start <= i) pick = o;
+    if (pick) out[i] = { rule: 3, strumIndex: pick.idx };
+  }
+  return out.map((o) => {
+    const p = o.strumIndex === null ? null : pats[o.strumIndex];
+    return { bpm: p && p.bpm > 0 ? p.bpm : null, strumIndex: o.strumIndex };
+  });
+}
+
+// Writes the proposal into the sections (only where the user has not edited the tempo).
+export function applySectionTempos(song) {
+  const prop = proposeSectionTempos(song);
+  song.sections.forEach((sec, i) => {
+    sec.strumIndex = prop[i].strumIndex;
+    if (sec.bpmSource === 'edited') return;
+    sec.bpm = prop[i].bpm;
+    sec.bpmSource = prop[i].bpm === null ? null : 'strumming';
+  });
+}
+
+// Effective BPM of every section: its own, else the previous section's, else song.bpm, else 80.
+export function effectiveSectionBpms(song) {
+  const out = [];
+  let prev = song.bpm > 0 ? song.bpm : DEFAULT_BPM;
+  for (const sec of song.sections) {
+    if (sec.bpm > 0) prev = sec.bpm;
+    out.push(prev);
+  }
+  return out;
+}
+
+// Sets the beats of every chord (global "beats per chord" setting).
+export function setAllChordBeats(song, beats) {
+  for (const sec of song.sections) for (const l of sec.lines) for (const c of l.chords) c.beats = beats;
+}
+
+// Chord durations of the whole song as a flat array (reading order), and the inverse.
+export function readChordBeats(song) {
+  const out = [];
+  for (const sec of song.sections) for (const l of sec.lines) for (const c of l.chords) out.push(c.beats);
+  return out;
+}
+
+export function sameChordStructure(a, b) {
+  if (a.sections.length !== b.sections.length) return false;
+  for (let i = 0; i < a.sections.length; i++) {
+    const x = a.sections[i];
+    const y = b.sections[i];
+    if (x.lines.length !== y.lines.length) return false;
+    for (let j = 0; j < x.lines.length; j++) {
+      const p = x.lines[j].chords;
+      const q = y.lines[j].chords;
+      if (p.length !== q.length) return false;
+      for (let k = 0; k < p.length; k++) if (p[k].name !== q[k].name) return false;
+    }
+  }
+  return true;
 }
 
 export function countChords(song) {

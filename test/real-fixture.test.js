@@ -83,3 +83,10 @@ test('real file: source url is saved without tracking parameters', opts, () => {
   assert.match(s.source.url, /^https:\/\/tabs\.ultimate-guitar\.com\/tab\//);
   assert.ok(!s.source.url.includes('?'));
 });
+
+test('real file: tempo proposal per section (62 / 96 / 142)', opts, () => {
+  const s = parseSongFromMht(readFileSync(FILE, 'utf-8'));
+  assert.deepEqual(s.sections.map((x) => x.bpm), [62, 96, 142, 96, 142, 96, 142, 96, 142, 96, 142, 96]);
+  assert.ok(s.sections.every((x) => x.bpmSource === 'strumming'));
+  assert.deepEqual(s.sections.map((x) => x.strumIndex), [0, 1, 2, 1, 2, 1, 2, 1, 2, 1, 2, 1]);
+});

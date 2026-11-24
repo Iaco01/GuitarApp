@@ -3,7 +3,7 @@
 import { visibleText, collapseSpaces, getAttr, classTokens, findElementEnd, removeElements } from './html-text.js';
 import { extractMainHtml } from './mht.js';
 import { isChordName } from './chord.js';
-import { createSong, listChordNames } from './model.js';
+import { createSong, listChordNames, applySectionTempos } from './model.js';
 
 const CHORD_CLASS_RE = /js-chord-chord|tabContent-chord/;
 const ADS_ELEMENTS_RE = /div|bidding-[a-z0-9-]+|img|svg|script|style|iframe|noscript|ins/;
@@ -332,7 +332,8 @@ export function parseSong({ html, subject = '', url = '' }) {
     }
   }
   if (ctx.emptyChordSpans > 0) warnings.push(`Ignorati ${ctx.emptyChordSpans} segni di accordo senza nome`);
-  const finalSections = sections.filter((s) => s.name !== '' || s.lines.length > 0);
+  const finalSections = sections.filter((s) => s.name !== '' || s.lines.length > 0)
+    .map((s) => ({ name: s.name, bpm: null, bpmSource: null, strumIndex: null, lines: s.lines }));
 
   // Metadata lives outside the <pre>.
   const pagePreStripped = html.replace(rawPre, '');
@@ -360,6 +361,7 @@ export function parseSong({ html, subject = '', url = '' }) {
   });
   song.source.url = cleanSourceUrl(url);
   song.chords = listChordNames(song);
+  applySectionTempos(song);
 
   if (song.chords.length === 0) warnings.push('Nel brano non sono stati trovati accordi');
   const carousel = carouselChords(pagePreStripped);
