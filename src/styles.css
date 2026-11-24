@@ -295,3 +295,5 @@ h1, h2, h3, p, ul, ol, dl, dd { margin: 0; }
 
 /* Low screens: small diagrams in the play panel are off by default */
 .playpanel.pp-nodg .pp-dg { display: none; }
+.capo-free { display: flex; align-items: center; gap: 8px; min-height: 44px; font-size: 16px; }
+.capo-free select { min-height: 44px; padding: 0 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--fg); font: 16px var(--ui); }

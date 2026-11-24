@@ -14,6 +14,11 @@ const only = process.argv[2] || '';
 let fails = 0;
 const rec = (id, ok, info) => { if (!ok) fails++; console.log(`${ok ? 'PASS' : 'FAIL'} ${id} ${info || ''}`); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// stop, tap tempo, speed and click toggles sit behind the "..." button of the play panel
+async function clickMore(page, sel) {
+  if (await page.evaluate(() => document.querySelector('#pp-more').hidden)) await page.click('#btn-more');
+  await page.click(sel);
+}
 
 // In page: counts words whose characters are on different rows.
 function splitWordsProbe() {
@@ -117,10 +122,10 @@ function splitWordsProbe() {
   rec('metronome-clicks', oscs >= 20, `${oscs} oscillators created`);
   console.log('first playing time', p0.toFixed(3), 'sections', JSON.stringify(data.sections.slice(0, 3)));
   await page.screenshot({ path: path.join(OUT, 'paused.png') });
-  await page.click('#btn-stop');
+  await clickMore(page, '#btn-stop');
 
   // ---- start from a tapped chord (paused) and section loop by long press ----
-  await page.click('#btn-stop');
+  await clickMore(page, '#btn-stop');
   await page.evaluate(() => window.scrollTo(0, 0));
   const secs = await page.evaluate(() => window.__gapp.timeline.sections.map((x) => [x.startSec, x.endSec]));
   // loop on the 2nd box (Chorus): long press on its header
@@ -148,11 +153,11 @@ function splitWordsProbe() {
   rec('loop-wraps-and-stays', wrapped && seen.every((t) => t >= secs[1][0] - 0.05 && t <= secs[1][1] + 0.05), `max ${maxSeen.toFixed(1)} of ${secs[1].map((x) => x.toFixed(1))}, wrapped ${wrapped}`);
   await page.click('.loop-x');
   rec('loop-exit', (await page.locator('.sec.looping').count()) === 0);
-  await page.click('#btn-stop');
+  await clickMore(page, '#btn-stop');
 
   // ---- tap tempo sets the section tempo ----
   const before = await page.evaluate(() => JSON.parse(localStorage.getItem('gapp.song.' + decodeURIComponent(location.hash.split('/')[2]))).sections[0].bpm);
-  for (let i = 0; i < 5; i++) { await page.click('#btn-tap'); await sleep(500); }
+  for (let i = 0; i < 5; i++) { await clickMore(page, '#btn-tap'); await sleep(500); }
   const after = await page.evaluate(() => { const s = JSON.parse(localStorage.getItem('gapp.song.' + decodeURIComponent(location.hash.split('/')[2]))).sections[0]; return [s.bpm, s.bpmSource]; });
   rec('tap-tempo', before === 62 && after[1] === 'edited' && after[0] >= 98 && after[0] <= 125, `62 -> ${after}`);
 
@@ -210,7 +215,7 @@ function splitWordsProbe() {
   await page.setInputFiles('#import-input', REAL);
   await page.waitForSelector('.dlg');
   await page.screenshot({ path: path.join(OUT, 'duplicate.png') });
-  await page.click('.dlg [data-value="replace"]');
+  await page.click('.dlg [data-value="replace:0"]');
   await page.waitForSelector('#song-title');
   const edited = await page.evaluate(() => { const s = JSON.parse(localStorage.getItem('gapp.song.' + decodeURIComponent(location.hash.split('/')[2]))); return [s.timingSource, s.sections[0].bpm, JSON.parse(localStorage.getItem('gapp.index.v1')).length]; });
   rec('reimport-replace-keeps-edits', edited[0] === 'recorded' && edited[1] === bpm && edited[2] === 1, JSON.stringify(edited));

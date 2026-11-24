@@ -122,10 +122,23 @@ export function openCapoSheet(song, onChange) {
       song.view.showShapes = shapes.checked;
       onChange();
     });
+    // free choice 0-12
+    const free = domEl('select', {
+      id: 'capo-free',
+      'aria-label': 'Capotasto, tasto da 0 a 12',
+      onchange: () => {
+        const v = Number(free.value);
+        song.capo = v;
+        song.view.showShapes = v > 0;
+        onChange();
+        close();
+      },
+    }, Array.from({ length: 13 }, (_, i) => domEl('option', { value: String(i), selected: i === current }, i === 0 ? '0 (nessuno)' : String(i))));
     card.append(
       domEl('h2', { class: 'dlg-title' }, 'Capotasto'),
       domEl('p', { class: 'muted small' }, 'Le migliori posizioni per gli accordi di questo brano, con la trasposizione attuale.'),
       list,
+      domEl('label', { class: 'capo-free' }, 'Altro tasto: ', free),
       domEl('label', { class: 'capo-shapes' }, shapes, ' Mostra le forme da suonare'),
       domEl('button', { type: 'button', class: 'btn primary', id: 'capo-close', onclick: close }, 'Chiudi'));
   });

@@ -112,7 +112,7 @@ async function run(name, prof) {
   // C2 import
   await page.setInputFiles('#import-input', REAL);
   await page.waitForSelector('#song-title', { timeout: 10000 });
-  const head = await page.evaluate(() => ({ t: document.getElementById('song-title').textContent, a: document.getElementById('song-artist').textContent, meta: document.querySelector('.meta').innerText, secs: document.querySelectorAll('.sec').length, labels: document.querySelectorAll('.ch').length, chips: document.querySelectorAll('.chip').length, h3: [...document.querySelectorAll('.sec-title,.sec.rep>summary')].map((e) => e.textContent) }));
+  const head = await page.evaluate(() => ({ t: document.getElementById('song-title').textContent, a: document.getElementById('song-artist').textContent, meta: document.querySelector('.meta').innerText, secs: document.querySelectorAll('.sec').length, labels: document.querySelectorAll('.ch').length, chips: document.querySelectorAll('.dg-btn').length, h3: [...document.querySelectorAll('.sec-title,.sec.rep>summary')].map((e) => e.textContent) }));
   await shot('c2-song-top');
   rec(name, 'C2', head.t === 'American Pie' && head.a === 'Don McLean' && /Beginner/.test(head.meta) && /E A D G B E/.test(head.meta) && head.chips === 6, JSON.stringify({ t: head.t, a: head.a, meta: head.meta.replace(/\n/g, ' '), secs: head.secs, labels: head.labels, chips: head.chips }));
   console.log('   section headings:', head.h3.join(' | '));
@@ -218,8 +218,8 @@ async function run(name, prof) {
   await page.mouse.click(5, 5); // backdrop
   const gone2 = (await page.locator('.sheet').count()) === 0;
   // chip tap
-  await page.locator('.chip').first().scrollIntoViewIfNeeded();
-  await page.locator('.chip').first().tap();
+  await page.locator('.dg-btn').first().scrollIntoViewIfNeeded();
+  await page.locator('.dg-btn').first().tap();
   const chipOpens = (await page.locator('.sheet').count()) === 1;
   await page.keyboard.press('Escape');
   const gone3 = (await page.locator('.sheet').count()) === 0;
@@ -237,6 +237,9 @@ async function run(name, prof) {
   await page.evaluate(() => { location.hash = '#/'; });
   await page.waitForSelector('#import-input');
   await page.setInputFiles('#import-input', SYN);
+  // the file was imported before: the duplicate dialog asks what to do, keep both copies
+  await page.waitForSelector('#song-title, .dlg');
+  if (await page.locator('.dlg').count()) await page.click('.dlg [data-value="both"]');
   await page.waitForSelector('#song-title');
   await page.goBack();
   await page.waitForTimeout(200);
@@ -280,9 +283,14 @@ async function run(name, prof) {
   rec(name, 'C2-errors', /Impossibile importare/.test(err1) && /Impossibile importare/.test(err2), `txt: "${err1.slice(0, 90)}" | empty: "${err2.slice(0, 90)}"`);
   // same file twice (value reset)
   await page.setInputFiles('#import-input', SYN);
+  // the file was imported before: the duplicate dialog asks what to do, keep both copies
+  await page.waitForSelector('#song-title, .dlg');
+  if (await page.locator('.dlg').count()) await page.click('.dlg [data-value="both"]');
   await page.waitForSelector('#song-title');
   await page.goBack(); await page.waitForSelector('#import-input');
   await page.setInputFiles('#import-input', SYN);
+  await page.waitForSelector('#song-title, .dlg');
+  if (await page.locator('.dlg').count()) await page.click('.dlg [data-value="both"]');
   await page.waitForSelector('#song-title');
   await page.click('#btn-back'); await page.waitForSelector('.songs');
   const dupRows = await page.locator('.song-row').count();
