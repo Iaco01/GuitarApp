@@ -86,6 +86,7 @@ export function openSyncScreen({ song, persist, onClose, blob = null }) {
       onError: (t) => setMsg(t, true),
     });
     player.setMetronome(false);
+    scrub.max = String(song.audio.durationSec || 1);
     window.__gappSync = { player, element: player.element };
   }
 

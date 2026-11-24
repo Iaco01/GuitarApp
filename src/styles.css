@@ -339,3 +339,4 @@ h1, h2, h3, p, ul, ol, dl, dd { margin: 0; }
 .audio-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .audio-state { font-size: 14px; color: var(--muted); overflow-wrap: anywhere; }
 .audio-state.error { color: var(--danger); font-weight: 600; }
+.sync-sug .btn { flex: none; white-space: nowrap; }
