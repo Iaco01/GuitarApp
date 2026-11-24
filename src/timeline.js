@@ -3,10 +3,60 @@
 
 import { effectiveSectionBpms } from './model.js';
 
-export function buildTimeline(song, { speed = 1 } = {}) {
+// Keeps the anchors (section index -> seconds into the audio) that are usable: finite, for an
+// existing section and strictly increasing with the section index. Others are dropped with a
+// warning. Returns { valid: Map(sectionIndex -> sec), warnings }.
+export function usableAnchors(anchors, sectionCount) {
+  const valid = new Map();
+  const warnings = [];
+  const keys = Object.keys(anchors || {}).map(Number).filter((k) => Number.isInteger(k)).sort((x, y) => x - y);
+  let last = -Infinity;
+  for (const k of keys) {
+    const v = Number(anchors[k]);
+    if (k < 0 || k >= sectionCount) {
+      warnings.push(`ancora della sezione ${k + 1} ignorata: la sezione non esiste`);
+    } else if (!Number.isFinite(v) || v < 0) {
+      warnings.push(`ancora della sezione ${k + 1} ignorata: istante non valido`);
+    } else if (v <= last) {
+      warnings.push(`ancora della sezione ${k + 1} ignorata: non è dopo la precedente`);
+    } else {
+      valid.set(k, v);
+      last = v;
+    }
+  }
+  return { valid, warnings };
+}
+
+// `anchors` ({ [sectionIndex]: sec }) pins sections to instants of the audio: an anchored section
+// starts exactly there and the following ones continue from it with their own tempo. Between two
+// anchors, if the sections would run past the next anchor they are compressed to end there (the
+// tempo they imply is higher); if they end earlier there is a gap. Without anchors: round 2 times.
+export function buildTimeline(song, { speed = 1, anchors = null } = {}) {
   const sp = speed > 0 ? speed : 1;
   const bpms = effectiveSectionBpms(song);
   const perBar = Math.max(1, (song.timeSignature && song.timeSignature[0]) || 4);
+  const { valid, warnings } = usableAnchors(anchors, song.sections.length);
+  // natural length of every section in seconds at its tempo
+  const nat = song.sections.map((sec, si) => {
+    let n = 0;
+    for (const l of sec.lines) for (const c of l.chords) n += Math.max(1, Math.round(Number(c.beats) || 1));
+    return n * (60 / bpms[si] / sp);
+  });
+  // scale of each section: runs between anchors that overflow the next anchor are squeezed
+  const scale = song.sections.map(() => 1);
+  let from = 0;
+  let start = 0;
+  const squeeze = (to, end) => {
+    let total = 0;
+    for (let i = from; i < to; i++) total += nat[i];
+    const room = end - start;
+    if (total > room + 1e-9) for (let i = from; i < to; i++) scale[i] = Math.max(room, 0) / total;
+  };
+  for (const [k, sec] of valid) {
+    if (k > from) squeeze(k, sec);
+    from = k;
+    start = sec;
+  }
   const events = [];
   const beats = [];
   const sections = [];
@@ -14,9 +64,9 @@ export function buildTimeline(song, { speed = 1 } = {}) {
   let secCursor = 0;
   song.sections.forEach((sec, si) => {
     const bpm = bpms[si];
-    const spb = 60 / bpm / sp;
+    const spb = (60 / bpm / sp) * scale[si];
     const startBeat = beatCursor;
-    const startSec = secCursor;
+    const startSec = valid.has(si) ? valid.get(si) : secCursor;
     sec.lines.forEach((line, li) => {
       line.chords.forEach((c, ci) => {
         const n = Math.max(1, Math.round(Number(c.beats) || 1));
@@ -49,9 +99,9 @@ export function buildTimeline(song, { speed = 1 } = {}) {
     });
     const count = beatCursor - startBeat;
     secCursor = startSec + count * spb;
-    sections.push({ index: si, startSec, endSec: secCursor, startBeat, endBeat: beatCursor, bpm });
+    sections.push({ index: si, startSec, endSec: secCursor, startBeat, endBeat: beatCursor, bpm, spb, anchored: valid.has(si) });
   });
-  return { events, beats, sections, totalBeats: beatCursor, totalSec: secCursor, speed: sp };
+  return { events, beats, sections, totalBeats: beatCursor, totalSec: secCursor, speed: sp, warnings };
 }
 
 // Greatest index i with list[i][key] <= value, or -1.
@@ -82,8 +132,7 @@ export function beatIndexAtTime(timeline, sec) {
 
 // Seconds per beat of the section with the given index in this timeline.
 function secPerBeatOfSection(timeline, sectionIndex) {
-  const s = timeline.sections[sectionIndex];
-  return 60 / s.bpm / timeline.speed;
+  return timeline.sections[sectionIndex].spb;
 }
 
 // Fractional beat position (0 = first beat of the song) at `sec`; negative before the start and

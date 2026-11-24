@@ -60,7 +60,9 @@ export function stripAudio(song) {
   if (!song.audio || typeof song.audio !== 'object') return song;
   const meta = {};
   for (const [k, v] of Object.entries(song.audio)) {
-    if (v === null || typeof v === 'number' || typeof v === 'boolean' || (typeof v === 'string' && v.length <= 200)) meta[k] = v;
+    if (k === 'anchors' && v && typeof v === 'object' && !Array.isArray(v)) {
+      meta.anchors = Object.fromEntries(Object.entries(v).filter(([, t]) => typeof t === 'number' && Number.isFinite(t)));
+    } else if (v === null || typeof v === 'number' || typeof v === 'boolean' || (typeof v === 'string' && v.length <= 200)) meta[k] = v;
   }
   return { ...song, audio: meta };
 }

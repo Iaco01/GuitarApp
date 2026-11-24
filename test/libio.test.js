@@ -148,3 +148,16 @@ test('stripAudio keeps only plain metadata', () => {
   assert.deepEqual(stripAudio(s).audio, { name: 'x.mp3', offset: 1.5 });
   assert.equal(stripAudio(mk('A', 'b')).audio, null);
 });
+
+test('stripAudio keeps the anchors map and a full round trip keeps offset and anchors', () => {
+  const audio = { fileName: 'x.mp3', size: 9, durationSec: 5, offsetSec: 1.7, anchors: { 1: 42.5 }, metronome: false, addedAt: '2026-01-01T00:00:00Z' };
+  const s = mk('A', 'b', { audio });
+  assert.deepEqual(stripAudio(s).audio.anchors, { 1: 42.5 });
+  const st = new Map();
+  const storage = { getItem: (k) => (st.has(k) ? st.get(k) : null), setItem: (k, v) => st.set(k, String(v)), removeItem: (k) => st.delete(k) };
+  putSong(s, storage);
+  const parsed = parseExport(JSON.stringify(buildExport(storage)));
+  assert.equal(parsed.songs[0].audio.offsetSec, 1.7);
+  assert.deepEqual(parsed.songs[0].audio.anchors, { 1: 42.5 });
+  assert.equal(parsed.songs[0].audio.fileName, 'x.mp3');
+});

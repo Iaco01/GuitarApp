@@ -55,6 +55,7 @@ export function validateSong(obj) {
   }
   if (obj.transpose !== undefined && !(Number.isInteger(obj.transpose) && Math.abs(obj.transpose) <= 12)) errors.push('transpose non valido (intero tra −12 e +12)');
   if (obj.capo !== undefined && !(Number.isInteger(obj.capo) && obj.capo >= 0 && obj.capo <= 12)) errors.push('capo non valido (intero tra 0 e 12)');
+  if (obj.audio !== null && obj.audio !== undefined && !isObj(obj.audio)) errors.push('audio non valido');
   if (!Array.isArray(obj.chords)) errors.push('chords deve essere un array');
   if (!Array.isArray(obj.strumming)) errors.push('strumming deve essere un array');
   if (!Array.isArray(obj.sections)) {
@@ -93,6 +94,7 @@ export function migrateSong(obj) {
   merged.importInfo = { ...base.importInfo, ...(obj && obj.importInfo ? obj.importInfo : {}) };
   const oldVersion = obj && Number.isInteger(obj.schemaVersion) ? obj.schemaVersion : 1;
   merged.schemaVersion = SONG_SCHEMA_VERSION;
+  merged.audio = normalizeAudio(merged.audio);
   if (Array.isArray(merged.sections)) {
     merged.sections = merged.sections.map((sec) => ({
       ...sec,
@@ -315,4 +317,47 @@ export function mergeIntoExisting(fresh, old) {
     if (oldSong.bpm) merged.bpm = oldSong.bpm;
   }
   return { merged, sameStructure, hadEdits: oldSong.timingSource !== 'default' };
+}
+
+// Cleans the audio metadata of a song (import, migration). Returns null for anything unusable.
+export function normalizeAudio(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const num = (v, d) => (Number.isFinite(v) ? v : d);
+  const out = {
+    fileName: typeof raw.fileName === 'string' ? raw.fileName.slice(0, 200) : '',
+    mimeType: typeof raw.mimeType === 'string' ? raw.mimeType.slice(0, 100) : '',
+    size: Math.max(0, num(raw.size, 0)),
+    durationSec: Math.max(0, num(raw.durationSec, 0)),
+    offsetSec: Math.max(0, num(raw.offsetSec, 0)),
+    anchors: {},
+    metronome: !!raw.metronome,
+    addedAt: typeof raw.addedAt === 'string' ? raw.addedAt : '',
+  };
+  if (Number.isFinite(raw.endSec) && raw.endSec > out.offsetSec) out.endSec = raw.endSec;
+  if (raw.anchors && typeof raw.anchors === 'object') {
+    for (const [k, v] of Object.entries(raw.anchors)) {
+      if (Number.isInteger(Number(k)) && Number(k) > 0 && Number.isFinite(v) && v >= 0) out.anchors[Number(k)] = v;
+    }
+  }
+  return out;
+}
+
+// A rest bar ("pausa") for intros and solos without chords: one N.C. event of 4 beats.
+export function makePauseLine(beats = 4) {
+  return { lyric: '', chords: [{ name: 'N.C.', rest: true, beats, col: 0 }] };
+}
+
+export function insertPause(song, sectionIndex) {
+  const sec = song.sections[sectionIndex];
+  if (!sec) return;
+  sec.lines.unshift(makePauseLine(4));
+}
+
+// Removes the line holding a rest chord ({ lyric: '' } only) at section/line/chord indices.
+export function removePause(song, si, li, ci) {
+  const line = song.sections[si] && song.sections[si].lines[li];
+  if (!line || !line.chords[ci] || !line.chords[ci].rest) return false;
+  line.chords.splice(ci, 1);
+  if (line.chords.length === 0 && !line.lyric) song.sections[si].lines.splice(li, 1);
+  return true;
 }
