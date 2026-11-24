@@ -1,0 +1,9 @@
+node_modules/
+dist/
+test-artifacts/
+# Pagine Ultimate Guitar reali: contengono testi protetti da copyright, solo in locale
+test/fixtures/local/
+*.mht
+*.mhtml
+!test/fixtures/synthetic/*.mht
+.DS_Store
