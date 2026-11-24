@@ -190,7 +190,7 @@ Song = {
 
 ## Test
 
-- `npm test` = `node --test test/`.
+- `npm test` = `node --test "test/*.test.js"`.
 - Fixture sintetiche in `test/fixtures/synthetic/` generate da `test/fixtures/make-fixtures.mjs` (committate anche le uscite, così i test non dipendono dalla generazione). Testo inventato, non copiato da canzoni reali. Varianti obbligatorie:
   - `song-binary.mht` — come Chrome: `multipart/related`, HTML con `Content-Transfer-Encoding: binary`, più una parte CSS e una immagine base64 fittizie dopo l'HTML.
   - `song-qp.mht` — stessa pagina con HTML in `quoted-printable` (righe ≤ 76 caratteri, soft break, caratteri accentati UTF-8 nel testo e nel Subject codificato RFC 2047).
