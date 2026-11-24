@@ -59,4 +59,11 @@ Come i round precedenti: commit piccoli con test verdi, niente push, verifica Pl
 
 ## Correzioni dal round 2
 
-(da completare dopo il report del tester)
+Dal report `docs/reports/round-2-test.md` (numeri = bug del tester).
+
+1. **Wake Lock: pausa prima della concessione** lascia il blocco attivo (`acquireWake`/`releaseWake` in `src/player.js`). Quando la richiesta si risolve dopo una pausa/stop, il lock va rilasciato subito. Il test `todo` in `test/regression/round2-player.todo.test.js` deve passare: spostalo tra i test normali senza `todo` e rimuovi la cartella se resta vuota.
+2. **Avviso "lo schermo potrebbe spegnersi"**: mostralo nel pannello del player (una riga discreta, chiudibile), non nell'area avvisi in cima che durante il play scorre fuori vista.
+3. **"Sostituisci" con più copie dello stesso brano**: se ce n'è più di una, il dialogo elenca le copie (titolo + data di import) e si sceglie quale sostituire.
+4. **Tocco saltato in registrazione**: nell'anteprima evidenzia le durate sospette (≥ 2× o ≤ ½ della mediana della sezione registrata) con un avviso "forse hai saltato un tocco qui".
+5. **Scorrimento**: la riga corrente oggi sta a 0,33–0,38 dell'altezza visibile, sul bordo del terzo superiore. Portala al 25% dell'altezza visibile *sopra il pannello*.
+6. **Ingombro del pannello**: su iPhone 13 a scala 1,5 restano 3 righe intere. Durante il play mostra solo la riga principale (accordo corrente, prossimo, pallini, ritmo, play/pausa) e raccogli velocità / clic / tap tempo / stop dietro un pulsante "⋯" che apre una seconda riga. Obiettivo: pannello ≤ 120 px in play su 360 px di larghezza, misurato con Playwright, e almeno 5 righe intere visibili su iPhone 13 a scala 1,5.
