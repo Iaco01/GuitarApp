@@ -79,3 +79,29 @@ export function eventIndexAtTime(timeline, sec) {
 export function beatIndexAtTime(timeline, sec) {
   return lastAtOrBefore(timeline.beats, 'timeSec', sec);
 }
+
+// Seconds per beat of the section with the given index in this timeline.
+function secPerBeatOfSection(timeline, sectionIndex) {
+  const s = timeline.sections[sectionIndex];
+  return 60 / s.bpm / timeline.speed;
+}
+
+// Fractional beat position (0 = first beat of the song) at `sec`; negative before the start and
+// extrapolated at the last tempo after the end. Independent of `speed`.
+export function beatPositionAtTime(timeline, sec) {
+  if (timeline.beats.length === 0) return 0;
+  const idx = beatIndexAtTime(timeline, sec);
+  const i = Math.max(0, idx);
+  const b = timeline.beats[i];
+  const spb = secPerBeatOfSection(timeline, b.sectionIndex);
+  const frac = (sec - b.timeSec) / spb;
+  return b.index + (idx === -1 ? frac : Math.min(frac, 1 - 1e-12));
+}
+
+// Inverse of beatPositionAtTime.
+export function timeAtBeatPosition(timeline, pos) {
+  if (timeline.beats.length === 0) return 0;
+  const i = Math.min(timeline.beats.length - 1, Math.max(0, Math.floor(pos)));
+  const b = timeline.beats[i];
+  return b.timeSec + (pos - b.index) * secPerBeatOfSection(timeline, b.sectionIndex);
+}
