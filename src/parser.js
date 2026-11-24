@@ -56,28 +56,53 @@ function annotationTokens(text) {
   return tokens;
 }
 
+// Maps the index of every <span ...> opening tag in `line` to the index just after its matching
+// </span> (single linear pass with a stack; unclosed spans have no entry).
+function matchSpanEnds(line) {
+  const ends = new Map();
+  const stack = [];
+  const re = /<(\/?)span(?=[\s>\/])[^>]*>/gi;
+  let m;
+  while ((m = re.exec(line))) {
+    if (m[1]) {
+      const open = stack.pop();
+      if (open !== undefined) ends.set(open, m.index + m[0].length);
+    } else if (!m[0].endsWith('/>')) {
+      stack.push(m.index);
+    }
+  }
+  return ends;
+}
+
 // Analyses a line when chord spans are present. Returns { chords, text } where `chords` is the
 // list of { name, col, mark? } or null if the line is not a chord line.
-function analyseSpanLine(line) {
+function analyseSpanLine(line, ctx) {
   const chords = [];
   let visible = '';
   let outside = []; // text pieces outside chord spans, with the chord index they follow
   let pos = 0;
+  const ends = matchSpanEnds(line);
   SPAN_OPEN_RE.lastIndex = 0;
   let m;
   let mixedText = false;
   while ((m = SPAN_OPEN_RE.exec(line))) {
+    if (m.index < pos) continue;
     const tag = m[0];
     const cls = getAttr(tag, 'class') || '';
     const isChord = CHORD_CLASS_RE.test(cls) || getAttr(tag, 'data-original-chord') !== null || getAttr(tag, 'data-name') !== null;
     if (!isChord) continue;
-    const end = findElementEnd(line, m.index, 'span');
-    if (end === -1) continue;
+    const end = ends.get(m.index);
+    if (end === undefined) continue;
+    const inner = visibleText(line.slice(m.index + tag.length, end));
+    const name = (getAttr(tag, 'data-original-chord') ?? getAttr(tag, 'data-name') ?? inner).trim();
+    if (name === '') {
+      // a chord span without a name carries no chord: ignore it (its text stays plain text)
+      if (ctx) ctx.emptyChordSpans++;
+      continue;
+    }
     const before = visibleText(line.slice(pos, m.index));
     visible += before;
     if (before) outside.push({ after: chords.length - 1, text: before });
-    const inner = visibleText(line.slice(m.index + tag.length, end));
-    const name = (getAttr(tag, 'data-original-chord') ?? getAttr(tag, 'data-name') ?? inner).trim();
     chords.push({ name, col: visible.length });
     visible += inner;
     pos = end;
@@ -260,9 +285,10 @@ export function parseSong({ html, subject = '', url = '' }) {
   const hasSpans = /js-chord-chord|tabContent-chord|data-original-chord/.test(cleanPre);
   const method = hasSpans ? 'spans' : 'text-fallback';
 
+  const ctx = { emptyChordSpans: 0 };
   const rows = cleanPre.split('\n').map((line) => {
     if (hasSpans) {
-      const a = analyseSpanLine(line);
+      const a = analyseSpanLine(line, ctx);
       if (a && a.chords) return { kind: 'chords', chords: a.chords };
       const t = a ? a.text : visibleText(line);
       return classifyText(t);
@@ -305,6 +331,7 @@ export function parseSong({ html, subject = '', url = '' }) {
       current.lines.push({ lyric: row.text, chords: [] });
     }
   }
+  if (ctx.emptyChordSpans > 0) warnings.push(`Ignorati ${ctx.emptyChordSpans} segni di accordo senza nome`);
   const finalSections = sections.filter((s) => s.name !== '' || s.lines.length > 0);
 
   // Metadata lives outside the <pre>.
@@ -331,6 +358,7 @@ export function parseSong({ html, subject = '', url = '' }) {
     sections: finalSections,
     importInfo: { method, warnings },
   });
+  song.source.url = cleanSourceUrl(url);
   song.chords = listChordNames(song);
 
   if (song.chords.length === 0) warnings.push('Nel brano non sono stati trovati accordi');
@@ -344,6 +372,18 @@ export function parseSong({ html, subject = '', url = '' }) {
   }
   if (strumming.length === 0) warnings.push('Ritmo e BPM non trovati nella pagina');
   return song;
+}
+
+// Source page URL without tracking parameters (?_gl=..., utm_*, ...).
+export function cleanSourceUrl(url) {
+  if (!url) return '';
+  const q = url.indexOf('?');
+  if (q === -1) return url.trim();
+  const hash = url.indexOf('#', q);
+  const base = url.slice(0, q);
+  const query = url.slice(q + 1, hash === -1 ? undefined : hash);
+  const kept = query.split('&').filter((kv) => kv && !/^(?:_gl|_ga|gclid|fbclid|utm_[a-z]+)=/i.test(kv));
+  return (base + (kept.length ? '?' + kept.join('&') : '')).trim();
 }
 
 function finishChord(c) {

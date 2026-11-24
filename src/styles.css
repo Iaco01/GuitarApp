@@ -110,7 +110,8 @@ h1, h2, h3, p, ul, ol, dl, dd { margin: 0; }
 .line { white-space: pre-wrap; overflow-wrap: anywhere; margin: 2px 0; }
 .line.plain { padding: 2px 0; }
 .line.instr .seg { margin-right: .6ch; }
-.seg { display: inline-block; vertical-align: baseline; }
+.w { white-space: nowrap; }
+.seg { display: inline-block; vertical-align: baseline; white-space: pre; }
 .ch {
   position: relative; display: block; width: max-content; max-width: 100%;
   margin-bottom: 1px; padding: 0 .3em; border: 1.5px solid var(--cc); border-radius: 6px;

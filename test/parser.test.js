@@ -126,3 +126,28 @@ test('chord spans in a line mixed with words are not chord lines', () => {
   assert.equal(s.sections[0].lines[0].chords.length, 0);
   assert.equal(s.sections[0].lines[0].lyric, 'G parole sparse');
 });
+
+// ---- regressions from the round 1 tester ----
+const mkRegression = (pre) => `Subject: T CHORDS by A\nContent-Type: multipart/related; boundary="B"\n\n--B\nContent-Type: text/html\nContent-Transfer-Encoding: 8bit\n\n<html><body><code class="js-tab-content">${pre}</code></body></html>\n--B--\n`;
+
+test('chord spans with no name are ignored with a warning', () => {
+  const s = parseSongFromMht(mkRegression('<pre>[A]\n<span class="tabContent-chord js-chord-chord"></span>   <span class="tabContent-chord js-chord-chord" data-original-chord="">x</span>\nlyric\n<span class="tabContent-chord js-chord-chord">G</span> <span class="tabContent-chord js-chord-chord"></span>\nmore</pre>'));
+  const names = s.sections.flatMap((x) => x.lines).flatMap((l) => l.chords).map((c) => c.name);
+  assert.deepEqual(names, ['G']);
+  assert.ok(s.importInfo.warnings.some((w) => /senza nome/.test(w)));
+});
+
+test('many unclosed chord spans are analysed in linear time', () => {
+  const html = mkRegression('<pre>' + '<span class="tabContent-chord js-chord-chord">'.repeat(20000) + '</pre>');
+  const t0 = Date.now();
+  try { parseSongFromMht(html); } catch { /* an error is fine */ }
+  const dt = Date.now() - t0;
+  assert.ok(dt < 1000, `took ${dt} ms for 20000 unclosed spans`);
+});
+
+test('source url is kept without tracking parameters', async () => {
+  const { cleanSourceUrl } = await import('../src/parser.js');
+  assert.equal(cleanSourceUrl('https://x.test/tab/a-1?_gl=1*abc*_up*MQ..'), 'https://x.test/tab/a-1');
+  assert.equal(cleanSourceUrl('https://x.test/tab/a-1?id=3&utm_source=z'), 'https://x.test/tab/a-1?id=3');
+  assert.equal(cleanSourceUrl(''), '');
+});

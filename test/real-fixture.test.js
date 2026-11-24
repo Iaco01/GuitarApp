@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { parseSongFromMht } from '../src/parser.js';
 import { countChords, validateSong } from '../src/model.js';
+import { buildLineGroups } from '../src/segments.js';
 
 // Real, copyrighted page kept out of git. Assertions use counts and metadata only.
 const FILE = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'local', 'american-pie.mht');
@@ -45,13 +46,40 @@ test('real file: advertisement removed, annotations kept', opts, () => {
   // No empty/blank-only lines and no leftover markup in lyrics.
   assert.ok(lines.every((l) => l.lyric === '' ? l.chords.length > 0 : l.lyric.trim() !== ''));
   assert.ok(lines.every((l) => !/[<>]/.test(l.lyric)));
-  assert.ok(lines.length >= 100 && lines.length <= 317);
+  assert.equal(lines.length, 137);
+  assert.equal(lines.filter((l) => l.lyric === '').length, 2); // instrumental lines
+  assert.equal(lines.flatMap((l) => l.chords).filter((c) => c.mark === '*').length, 38);
 });
 
 test('real file: every chord column stays inside the line or just past it', opts, () => {
   const s = parseSongFromMht(readFileSync(FILE, 'utf-8'));
+  const past = [];
   for (const l of s.sections.flatMap((x) => x.lines)) {
     if (l.lyric === '') continue;
-    for (const c of l.chords) assert.ok(c.col >= 0 && c.col <= l.lyric.length + 20);
+    for (const c of l.chords) {
+      assert.ok(Number.isInteger(c.col) && c.col >= 0);
+      if (c.col >= l.lyric.length) past.push(c.col - l.lyric.length);
+    }
   }
+  // exactly one chord sits past the end of its line, by one column
+  assert.deepEqual(past, [1]);
+});
+
+test('real file: rendered text (without chord labels) equals the lyric of every line', opts, () => {
+  const s = parseSongFromMht(readFileSync(FILE, 'utf-8'));
+  let checked = 0;
+  for (const l of s.sections.flatMap((x) => x.lines)) {
+    if (l.lyric === '' || l.chords.length === 0) continue;
+    const { items } = buildLineGroups(l);
+    const text = items.map((it) => (it.space !== undefined ? it.space : it.group.map((p) => (p.seg ? p.seg.text : p.text)).join(''))).join('');
+    assert.equal(text.trimEnd(), l.lyric.trimEnd());
+    checked++;
+  }
+  assert.ok(checked > 100);
+});
+
+test('real file: source url is saved without tracking parameters', opts, () => {
+  const s = parseSongFromMht(readFileSync(FILE, 'utf-8'));
+  assert.match(s.source.url, /^https:\/\/tabs\.ultimate-guitar\.com\/tab\//);
+  assert.ok(!s.source.url.includes('?'));
 });

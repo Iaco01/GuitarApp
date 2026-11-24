@@ -1,7 +1,7 @@
 // Song -> DOM for the song view. Chords sit above the syllable they belong to (see segments.js).
 
 import { domEl } from './ui/dom.js';
-import { buildLineSegments } from './segments.js';
+import { buildLineGroups } from './segments.js';
 import { groupRepeatedSections, baseSectionName } from './model.js';
 
 export const CHORD_PALETTE_SIZE = 10;
@@ -42,20 +42,21 @@ function renderChordLabel(song, chord, ref, onTap) {
 }
 
 export function renderLine(song, line, sectionIndex, lineIndex, onTap) {
-  const seg = buildLineSegments(line);
-  if (seg.segs.length === 0) return domEl('div', { class: 'line plain' }, line.lyric);
-  const parts = [];
-  if (seg.lead) parts.push(seg.lead);
-  for (const s of seg.segs) {
+  const { instrumental, items } = buildLineGroups(line);
+  if (items.length === 0 || !line.chords.length) return domEl('div', { class: 'line plain' }, line.lyric);
+  const renderSeg = (s) => {
     const chord = line.chords[s.index];
     const ref = `${sectionIndex}.${lineIndex}.${s.index}`;
     const width = chord.name.length + (chord.mark ? chord.mark.length : 0) + 1;
-    parts.push(domEl('span', { class: 'seg', style: { minWidth: width + 'ch' } },
+    return domEl('span', { class: 'seg', style: { minWidth: width + 'ch' } },
       renderChordLabel(song, chord, ref, onTap),
-      domEl('span', { class: 'ly' }, s.word || ' ')));
-    if (s.rest) parts.push(s.rest);
-  }
-  return domEl('div', { class: 'line' + (seg.instrumental ? ' instr' : '') }, parts);
+      domEl('span', { class: 'ly' }, s.text));
+  };
+  const parts = items.map((it) => {
+    if (it.space !== undefined) return it.space;
+    return domEl('span', { class: 'w' }, it.group.map((p) => (p.seg ? renderSeg(p.seg) : p.text)));
+  });
+  return domEl('div', { class: 'line' + (instrumental ? ' instr' : '') }, parts);
 }
 
 function renderLines(song, section, sectionIndex, onTap) {
