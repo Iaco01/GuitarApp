@@ -8,7 +8,7 @@ const SPEED_MIN = 50;
 const SPEED_MAX = 100;
 
 // `diagramSvg(label)` (optional) returns the small SVG of a chord shown next to its name.
-export function createPlayPanel(song, { onPlayPause, onStop, onSpeed, onMetronome, onTap, speedPct = 100, metronomeOn = true, diagramSvg = null }) {
+export function createPlayPanel(song, { onPlayPause, onStop, onSpeed, onMetronome, onTap, speedPct = 100, metronomeOn = true, diagramSvg = null, diagramsOn = true, onDiagrams = null, onNoticeClosed = null }) {
   const perBar = (song.timeSignature && song.timeSignature[0]) || 4;
   let speed = speedPct;
   let metro = metronomeOn;
@@ -54,7 +54,21 @@ export function createPlayPanel(song, { onPlayPause, onStop, onSpeed, onMetronom
     },
   }, metro ? 'Clic: sì' : 'Clic: no');
   const tapBtn = domEl('button', { type: 'button', class: 'btn', id: 'btn-tap', onclick: onTap }, 'Tap tempo');
-  const more = domEl('div', { class: 'pp-more', id: 'pp-more', hidden: true }, speedBox, metroBtn, tapBtn, stopBtn);
+  let dgOn = diagramsOn;
+  const dgBtn = domEl('button', {
+    type: 'button', class: 'btn', id: 'btn-pp-dg', 'aria-pressed': String(dgOn),
+    onclick: () => {
+      dgOn = !dgOn;
+      paintDg();
+      if (onDiagrams) onDiagrams(dgOn);
+    },
+  });
+  function paintDg() {
+    dgBtn.setAttribute('aria-pressed', String(dgOn));
+    dgBtn.textContent = dgOn ? 'Diagrammi: sì' : 'Diagrammi: no';
+    el.classList.toggle('pp-nodg', !dgOn);
+  }
+  const more = domEl('div', { class: 'pp-more', id: 'pp-more', hidden: true }, speedBox, metroBtn, tapBtn, dgBtn, stopBtn);
   const moreBtn = domEl('button', {
     type: 'button', class: 'btn pp-more-btn', id: 'btn-more', 'aria-label': 'Altri comandi', 'aria-expanded': 'false', 'aria-controls': 'pp-more',
     onclick: () => {
@@ -64,13 +78,15 @@ export function createPlayPanel(song, { onPlayPause, onStop, onSpeed, onMetronom
   }, '⋯');
   const noticeText = domEl('span', null, '');
   const notice = domEl('div', { class: 'pp-notice', id: 'pp-notice', role: 'status', hidden: true }, noticeText,
-    domEl('button', { type: 'button', class: 'btn icon', 'aria-label': 'Chiudi avviso', onclick: () => { notice.hidden = true; } }, '×'));
+    domEl('button', { type: 'button', class: 'btn icon', 'aria-label': 'Chiudi avviso', onclick: () => { notice.hidden = true; if (onNoticeClosed) onNoticeClosed(); } }, '×'));
 
   const el = domEl('div', { class: 'playpanel', id: 'playpanel', role: 'region', 'aria-label': 'Riproduzione' },
     notice,
     domEl('div', { class: 'pp-row1' }, cur, next, playBtn),
     domEl('div', { class: 'pp-row2' }, dotsEl, bpmEl, patEl, moreBtn),
     more);
+
+  paintDg();
 
   function setDiagram(holder, label) {
     const key = label === null || !diagramSvg ? '' : label;

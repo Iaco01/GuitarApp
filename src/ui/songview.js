@@ -21,6 +21,7 @@ const BEATS_MAX = 32;
 const LONG_PRESS_MS = 500;
 const MANUAL_SCROLL_PAUSE_MS = 4000;
 const TRANSPOSE_MAX = 12;
+const LOW_SCREEN_PX = 700;
 
 let activeScreen = null;
 
@@ -95,7 +96,7 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
     timeSignature: song.timeSignature,
     onFrame: (info) => onFrame(info),
     onState: (st) => onState(st),
-    onNotice: (text) => panel.showNotice(text),
+    onNotice: (text) => { if (!song.view.wakeNoticeClosed) panel.showNotice(text); },
   });
 
   function rebuildTimeline() {
@@ -540,6 +541,16 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
     },
     speedPct: 100,
     metronomeOn,
+    // short screens: small diagrams in the panel are off unless the user turned them on
+    diagramsOn: typeof song.view.panelDiagrams === 'boolean' ? song.view.panelDiagrams : window.innerHeight >= LOW_SCREEN_PX,
+    onDiagrams: (on) => {
+      song.view.panelDiagrams = on;
+      persist();
+    },
+    onNoticeClosed: () => {
+      song.view.wakeNoticeClosed = true;
+      persist();
+    },
   });
 
   // ---- duration editing ----

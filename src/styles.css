@@ -292,3 +292,6 @@ h1, h2, h3, p, ul, ol, dl, dd { margin: 0; }
 .lib-backup .row { display: flex; gap: 8px; flex-wrap: wrap; }
 .no-results { margin-top: 16px; color: var(--muted); }
 .dlg-details { padding-left: 18px; font-size: 14px; color: var(--muted); max-height: 30vh; overflow-y: auto; display: grid; gap: 2px; }
+
+/* Low screens: small diagrams in the play panel are off by default */
+.playpanel.pp-nodg .pp-dg { display: none; }
