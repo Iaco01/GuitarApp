@@ -66,3 +66,17 @@ test('settings round trip and missing storage', () => {
   assert.deepEqual(listSongs(none), []);
   assert.throws(() => saveSong(createSong(), none), /salvare/);
 });
+
+test('device settings are stored separately and tolerate junk', async () => {
+  const { getDevice, saveDevice } = await import('../src/storage.js');
+  const m = new Map();
+  const st = { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: (k) => m.delete(k) };
+  assert.deepEqual(getDevice(st), {});
+  saveDevice({ latencyMs: 180 }, st);
+  assert.deepEqual(getDevice(st), { latencyMs: 180 });
+  assert.ok(m.has('gapp.device.v1'));
+  m.set('gapp.device.v1', '[1,2]');
+  assert.deepEqual(getDevice(st), {});
+  m.set('gapp.device.v1', '{oops');
+  assert.deepEqual(getDevice(st), {});
+});

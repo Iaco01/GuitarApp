@@ -52,10 +52,10 @@ export function openRecorder({ song, player, getTimeline, span, onSave, onClose 
     } else {
       status.textContent = `Accordo ${Math.min(done + 1, span.eventCount)} di ${span.eventCount}`;
     }
-    expName.textContent = e ? displayChordName(song, e.name) : '';
+    expName.textContent = e ? (e.rest ? 'pausa' : displayChordName(song, e.name)) : '';
     if (e) expName.style.setProperty('--cc', chordColorVar(song, e.name));
     const hasNext = done + 1 < span.eventCount;
-    nextName.textContent = hasNext && n ? 'Poi: ' + displayChordName(song, n.name) : done + 1 === span.eventCount ? 'Ultimo accordo: tocca per chiuderlo' : '';
+    nextName.textContent = hasNext && n ? 'Poi: ' + (n.rest ? 'pausa' : displayChordName(song, n.name)) : done + 1 === span.eventCount ? 'Ultimo accordo: tocca per chiuderlo' : '';
     if (st === 'counting' || st === 'playing') seen = true;
     if (seen && st === 'stopped' && !finished) finish(false);
   }
@@ -91,7 +91,7 @@ export function openRecorder({ song, player, getTimeline, span, onSave, onClose 
       const ev = events[span.firstEventIndex + k];
       if (beats !== ev.beats) changed++;
       rows.append(domEl('li', { class: (beats !== ev.beats ? 'chg' : '') + (odd[k] ? ' warn' : '') },
-        domEl('span', { class: 'rec-row-name', style: { '--cc': chordColorVar(song, ev.name) } }, displayChordName(song, ev.name)),
+        domEl('span', { class: 'rec-row-name', style: { '--cc': chordColorVar(song, ev.name) } }, ev.rest ? 'pausa' : displayChordName(song, ev.name)),
         odd[k] ? domEl('span', { class: 'rec-warn' }, 'forse hai saltato un tocco qui') : null,
         domEl('span', { class: 'rec-row-val' }, `${ev.beats} → ${beats}`)));
     });

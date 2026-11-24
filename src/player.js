@@ -51,6 +51,51 @@ export function firstBeatIndexFrom(timeline, sec) {
   return i;
 }
 
+// Screen Wake Lock held while something plays. `acquire()` asks for the lock (and warns once through
+// onNotice when the browser cannot), `release()` gives it back, also when a request that was still
+// pending resolves after the release.
+export function createWakeKeeper({ onNotice, isDestroyed = () => false } = {}) {
+  let wakeLock = null;
+  let wakeWarned = false;
+  let wakeWanted = false;
+  let wakePending = false;
+  return {
+    async acquire() {
+      if (!(typeof navigator !== 'undefined' && navigator.wakeLock && navigator.wakeLock.request)) {
+        if (!wakeWarned) {
+          wakeWarned = true;
+          if (onNotice) onNotice('Il tuo browser non può tenere lo schermo acceso: lo schermo potrebbe spegnersi.');
+        }
+        return;
+      }
+      wakeWanted = true;
+      if (wakeLock || wakePending) return;
+      wakePending = true;
+      try {
+        const lock = await navigator.wakeLock.request('screen');
+        if (!wakeWanted || isDestroyed()) {
+          // paused or stopped while the request was pending: give the lock back at once
+          try { lock.release(); } catch { /* ignore */ }
+        } else {
+          wakeLock = lock;
+          lock.addEventListener('release', () => { if (wakeLock === lock) wakeLock = null; });
+        }
+      } catch {
+        wakeLock = null;
+      } finally {
+        wakePending = false;
+      }
+    },
+    release() {
+      wakeWanted = false;
+      if (wakeLock) {
+        try { wakeLock.release(); } catch { /* ignore */ }
+        wakeLock = null;
+      }
+    },
+  };
+}
+
 export function createPlayer({ timeline, timeSignature = [4, 4], onFrame, onState, onNotice } = {}) {
   let tl = timeline;
   let state = 'stopped'; // stopped | counting | playing | paused
@@ -64,10 +109,9 @@ export function createPlayer({ timeline, timeSignature = [4, 4], onFrame, onStat
   let core = null;
   let timer = null;
   let raf = 0;
-  let wakeLock = null;
-  let wakeWarned = false;
-  let wakeWanted = false;
-  let wakePending = false;
+  const wake = createWakeKeeper({ onNotice, isDestroyed: () => destroyed });
+  const acquireWake = wake.acquire;
+  const releaseWake = wake.release;
   let countSpb = 0.5;
   let countBeats = timeSignature[0] || 4;
   let destroyed = false;
@@ -177,41 +221,6 @@ export function createPlayer({ timeline, timeSignature = [4, 4], onFrame, onStat
       usingAudio = ctx.state === 'running';
     } catch {
       usingAudio = false;
-    }
-  }
-
-  async function acquireWake() {
-    if (!(typeof navigator !== 'undefined' && navigator.wakeLock && navigator.wakeLock.request)) {
-      if (!wakeWarned) {
-        wakeWarned = true;
-        if (onNotice) onNotice('Il tuo browser non può tenere lo schermo acceso: lo schermo potrebbe spegnersi.');
-      }
-      return;
-    }
-    wakeWanted = true;
-    if (wakeLock || wakePending) return;
-    wakePending = true;
-    try {
-      const lock = await navigator.wakeLock.request('screen');
-      if (!wakeWanted || destroyed) {
-        // paused or stopped while the request was pending: give the lock back at once
-        try { lock.release(); } catch { /* ignore */ }
-      } else {
-        wakeLock = lock;
-        lock.addEventListener('release', () => { if (wakeLock === lock) wakeLock = null; });
-      }
-    } catch {
-      wakeLock = null;
-    } finally {
-      wakePending = false;
-    }
-  }
-
-  function releaseWake() {
-    wakeWanted = false;
-    if (wakeLock) {
-      try { wakeLock.release(); } catch { /* ignore */ }
-      wakeLock = null;
     }
   }
 

@@ -1,9 +1,11 @@
 // Library screen: search, sort, list of imported songs, backup (JSON export/import), storage use.
 
 import { domEl, domClear } from './dom.js';
-import { listLibrary, deleteSong, getSettings, saveSettings, storageUsedBytes } from '../storage.js';
+import { listLibrary, deleteSong, getSettings, saveSettings, storageUsedBytes, getDevice } from '../storage.js';
 import { filterLibrary, sortLibrary, SORT_MODES, buildExport, exportFileName, parseExport, planImport, applyImport } from '../libio.js';
 import { choiceDialog } from './dialog.js';
+import { openCalibration } from './calibrate.js';
+import { audioStoreDelete, audioStoreTotals, audioStoreQuota } from '../audiostore.js';
 
 const MONTHS_IT = ['gen', 'feb', 'mar', 'apr', 'mag', 'giu', 'lug', 'ago', 'set', 'ott', 'nov', 'dic'];
 
@@ -18,6 +20,11 @@ export function formatDateTimeIt(iso) {
   if (Number.isNaN(d.getTime())) return '';
   const p = (n) => String(n).padStart(2, '0');
   return `${formatDateIt(iso)} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function formatMb(bytes) {
+  const mb = bytes / (1024 * 1024);
+  return mb < 10 ? mb.toFixed(1).replace('.', ',') + ' MB' : Math.round(mb).toLocaleString('it-IT') + ' MB';
 }
 
 function formatKb(bytes) {
@@ -115,7 +122,7 @@ export function showLibraryScreen(root, { onImportFile, message }) {
         domEl('a', { class: 'song-row', href: '#/song/' + encodeURIComponent(s.id) },
           domEl('span', { class: 'song-title' }, s.title || 'Senza titolo'),
           domEl('span', { class: 'song-meta' }, meta),
-          edited ? domEl('span', { class: 'song-badges' }, domEl('span', { class: 'badge', 'data-badge': 'durate' }, `durate ✓${s.bars ? ' · ' + s.bars + ' battute' : ''}`)) : null),
+          edited || s.hasAudio ? domEl('span', { class: 'song-badges' }, edited ? domEl('span', { class: 'badge', 'data-badge': 'durate' }, `durate ✓${s.bars ? ' · ' + s.bars + ' battute' : ''}`) : null, s.hasAudio ? domEl('span', { class: 'badge', 'data-badge': 'audio' }, 'audio ✓') : null) : null),
         domEl('button', {
           type: 'button',
           class: 'btn icon danger',
@@ -128,6 +135,7 @@ export function showLibraryScreen(root, { onImportFile, message }) {
               setMsg(err.message, true);
               return;
             }
+            audioStoreDelete(s.id).then(() => {});
             showLibraryScreen(root, { onImportFile });
           },
         }, '✕')));
@@ -137,8 +145,15 @@ export function showLibraryScreen(root, { onImportFile, message }) {
 
   // ---- backup ----
   const used = domEl('p', { class: 'muted small', id: 'storage-used' }, '');
-  const paintUsed = () => {
-    used.textContent = `Spazio usato nel browser: circa ${formatKb(storageUsedBytes())} (${entries.length} ${entries.length === 1 ? 'brano' : 'brani'}).`;
+  const paintUsed = async () => {
+    const base = `Spazio usato nel browser: circa ${formatKb(storageUsedBytes())} (${entries.length} ${entries.length === 1 ? 'brano' : 'brani'}).`;
+    used.textContent = base;
+    const totals = await audioStoreTotals();
+    const quota = await audioStoreQuota();
+    const parts = [];
+    if (totals.count) parts.push(`Audio: ${totals.count} ${totals.count === 1 ? 'file' : 'file'}, ${formatMb(totals.bytes)}.`);
+    if (quota && quota.quota) parts.push(`Il browser ha usato ${formatMb(quota.usage)} su ${formatMb(quota.quota)} disponibili.`);
+    if (parts.length) used.textContent = `${base} ${parts.join(' ')}`;
   };
   const jsonInput = domEl('input', {
     type: 'file',
@@ -216,6 +231,18 @@ export function showLibraryScreen(root, { onImportFile, message }) {
     used);
   paintUsed();
 
+  const latencyNote = domEl('p', { class: 'muted small', id: 'device-latency' }, '');
+  const paintLatency = () => {
+    const ms = getDevice().latencyMs;
+    latencyNote.textContent = Number.isFinite(ms) ? `Latenza dell’audio su questo dispositivo: ${ms} ms.` : 'Latenza dell’audio non ancora calibrata (0 ms).';
+  };
+  paintLatency();
+  const device = domEl('section', { class: 'lib-backup', id: 'lib-device' },
+    domEl('h2', null, 'Audio e cuffie'),
+    latencyNote,
+    domEl('div', { class: 'row' },
+      domEl('button', { type: 'button', class: 'btn', id: 'btn-calibrate', onclick: () => openCalibration({ onSaved: paintLatency }) }, 'Calibra la latenza')));
+
   const empty = domEl('section', { class: 'empty' },
     domEl('h2', null, 'Nessun brano ancora'),
     domEl('p', null, 'Importa una pagina di Ultimate Guitar salvata come file .mht.'),
@@ -225,5 +252,5 @@ export function showLibraryScreen(root, { onImportFile, message }) {
       domEl('li', null, 'Tocca «Importa .mht» e scegli il file.')));
 
   renderList();
-  root.append(domEl('div', { class: 'screen lib' }, header, msg, entries.length ? tools : null, entries.length ? listHolder : empty, backup));
+  root.append(domEl('div', { class: 'screen lib' }, header, msg, entries.length ? tools : null, entries.length ? listHolder : empty, device, backup));
 }

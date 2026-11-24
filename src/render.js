@@ -13,6 +13,7 @@ export function chordColorVar(song, name) {
 }
 
 function renderChordLabel(song, chord, ref, onTap, showBeats) {
+  if (chord.rest) return renderRestLabel(chord, ref, onTap, showBeats);
   // shown name follows transposition and the capo shapes view; the colour stays tied to the written chord
   const shown = displayChordName(song, chord.name);
   const label = domEl('span', {
@@ -36,13 +37,35 @@ function renderChordLabel(song, chord, ref, onTap, showBeats) {
   return label;
 }
 
+// Rest bar ("pausa"): grey label, no diagram, no chord colour.
+function renderRestLabel(chord, ref, onTap, showBeats) {
+  const label = domEl('span', {
+    class: 'ch rest',
+    role: 'button',
+    tabindex: '0',
+    'data-orig': chord.name,
+    'data-rest': '1',
+    'data-ref': ref,
+    style: { '--cc': 'var(--muted)' },
+  }, 'pausa', showBeats ? domEl('span', { class: 'bt' }, String(chord.beats)) : null);
+  const fire = () => onTap && onTap(ref, chord.name);
+  label.addEventListener('click', fire);
+  label.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      fire();
+    }
+  });
+  return label;
+}
+
 export function renderLine(song, line, sectionIndex, lineIndex, onTap, showBeats) {
   const { instrumental, items } = buildLineGroups(line);
   if (items.length === 0 || !line.chords.length) return domEl('div', { class: 'line plain' }, line.lyric);
   const renderSeg = (s) => {
     const chord = line.chords[s.index];
     const ref = `${sectionIndex}.${lineIndex}.${s.index}`;
-    const width = displayChordName(song, chord.name).length + (chord.mark ? chord.mark.length : 0) + 1;
+    const width = (chord.rest ? 5 : displayChordName(song, chord.name).length) + (chord.mark ? chord.mark.length : 0) + 1;
     return domEl('span', { class: 'seg', style: { minWidth: width + 'ch' } },
       renderChordLabel(song, chord, ref, onTap, showBeats),
       domEl('span', { class: 'ly' }, s.text));

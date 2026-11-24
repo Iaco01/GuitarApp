@@ -125,13 +125,13 @@ export function createPlayPanel(song, { onPlayPause, onStop, onSpeed, onMetronom
         curName.classList.remove('count');
         const label = d.event ? d.curLabel || d.event.name : '–';
         curName.textContent = label;
-        if (d.event) curName.style.setProperty('--cc', chordColorVar(song, d.event.name));
+        if (d.event) curName.style.setProperty('--cc', d.event.rest ? 'var(--muted)' : chordColorVar(song, d.event.name));
         setDiagram(curDg, d.event ? label : null);
       }
       if (d.state === 'counting') setDiagram(curDg, null);
       setDiagram(nextDg, d.nextEvent ? d.nextLabel || d.nextEvent.name : null);
       nextName.textContent = d.nextEvent ? d.nextLabel || d.nextEvent.name : '–';
-      nextName.style.setProperty('--cc', d.nextEvent ? chordColorVar(song, d.nextEvent.name) : 'var(--muted)');
+      nextName.style.setProperty('--cc', d.nextEvent && !d.nextEvent.rest ? chordColorVar(song, d.nextEvent.name) : 'var(--muted)');
       nextBadge.textContent = d.nextEvent && d.beatsLeft > 0 ? String(d.beatsLeft) : '';
       dots.forEach((dot, i) => dot.classList.toggle('on', d.beatInBar === i));
       bpmEl.textContent = `♩ = ${formatBpm(d.bpm)}`;
@@ -152,5 +152,11 @@ export function createPlayPanel(song, { onPlayPause, onStop, onSpeed, onMetronom
       curBar.firstChild.style.width = Math.round(p * 100) + '%';
     },
     getSpeed: () => speed,
+    // updates the click button without firing onMetronome (mode switch between metronome and audio)
+    setMetronomeState(on) {
+      metro = !!on;
+      metroBtn.setAttribute('aria-pressed', String(metro));
+      metroBtn.textContent = metro ? 'Clic: sì' : 'Clic: no';
+    },
   };
 }

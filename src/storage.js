@@ -51,6 +51,7 @@ function indexEntry(song, openedAt) {
     timingSource: song.timingSource || 'default',
     bars: Array.isArray(song.sections) ? countBars(song) : 0,
   };
+  if (song.audio) entry.hasAudio = true;
   if (openedAt) entry.openedAt = openedAt;
   return entry;
 }
@@ -154,4 +155,20 @@ export function getSettings(storage) {
 
 export function saveSettings(settings, storage) {
   writeJson(needStorage(storage), KEY_SETTINGS, settings);
+}
+
+// ---- device settings (not tied to a song): output latency, round 4 ----
+
+const KEY_DEVICE = 'gapp.device.v1';
+
+// { latencyMs?: number } (missing = never calibrated)
+export function getDevice(storage) {
+  const st = storage || defaultStorage();
+  if (!st) return {};
+  const d = readJson(st, KEY_DEVICE, {});
+  return d && typeof d === 'object' && !Array.isArray(d) ? d : {};
+}
+
+export function saveDevice(device, storage) {
+  writeJson(needStorage(storage), KEY_DEVICE, device);
 }

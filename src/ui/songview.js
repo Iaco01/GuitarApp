@@ -5,12 +5,18 @@ import { renderSongBody, formatBpm } from '../render.js';
 import { saveSong, deleteSong } from '../storage.js';
 import { buildTimeline } from '../timeline.js';
 import { createPlayer } from '../player.js';
+import { createAudioPlayer } from '../audio.js';
+import { audioAnchors, formatClock } from '../audiosync.js';
+import { audioStoreGet, audioStoreDelete } from '../audiostore.js';
+import { getDevice } from '../storage.js';
+import { openSyncScreen } from './syncscreen.js';
+import { attachAudioFile, AUDIO_ACCEPT } from './audiofile.js';
 import { createPlayPanel } from './playpanel.js';
 import { openRecorder } from './recorder.js';
 import { createTapTempo } from '../taprecord.js';
 import { displayChordName } from '../transpose.js';
 import { openChordSheet, openCapoSheet, renderDiagramRow, smallDiagramSvg } from './chordsheet.js';
-import { effectiveSectionBpms, groupRepeatedSections, setAllChordBeats, sectionSignature, baseSectionName } from '../model.js';
+import { effectiveSectionBpms, groupRepeatedSections, setAllChordBeats, sectionSignature, baseSectionName, insertPause, removePause } from '../model.js';
 
 const FONT_MIN = 0.7;
 const FONT_MAX = 2.0;
@@ -54,7 +60,11 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
   let editMode = false;
   let speed = 1;
   let metronomeOn = true;
-  let timeline = buildTimeline(song, { speed });
+  let plainTimeline = buildTimeline(song, { speed });
+  let timeline = plainTimeline;
+  let audioPlayer = null;
+  let audioStatus = 'none'; // none | loading | ready | missing | error
+  let audioGen = 0;
   let selectedRef = null;
   let evEl = []; // event index -> chord label element (rendered, possibly merged section)
   let groupFirst = [];
@@ -70,6 +80,7 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
   const tapTempo = createTapTempo();
 
   const disp = (name) => displayChordName(song, name);
+  const evLabel = (ev) => (ev.rest ? '—' : disp(ev.name));
   const notice = domEl('div', { class: 'msg', role: 'alert' });
   const showError = (text) => {
     notice.textContent = text;
@@ -91,19 +102,90 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
   const gapp = { player: { state: 'stopped', timeSec: 0, eventIndex: -1, beatIndex: -1 }, timeline };
   window.__gapp = gapp;
 
-  const player = createPlayer({
+  const onNotice = (text) => { if (!song.view.wakeNoticeClosed) panel.showNotice(text); };
+  // metronome-only player (also used by the tap recorder, which needs the plain timeline) ...
+  const metroPlayer = createPlayer({
     timeline,
     timeSignature: song.timeSignature,
     onFrame: (info) => onFrame(info),
     onState: (st) => onState(st),
-    onNotice: (text) => { if (!song.view.wakeNoticeClosed) panel.showNotice(text); },
+    onNotice,
   });
+  // ... and `player`, the one that is in charge: the audio player when the song has an audio file
+  let player = metroPlayer;
 
   function rebuildTimeline() {
-    timeline = buildTimeline(song, { speed });
+    plainTimeline = buildTimeline(song, { speed });
+    metroPlayer.setTimeline(plainTimeline);
+    if (player === audioPlayer && audioPlayer) {
+      timeline = buildTimeline(song, { speed: 1, anchors: audioAnchors(song.audio) });
+      audioPlayer.setTimeline(timeline);
+    } else {
+      timeline = plainTimeline;
+    }
     gapp.timeline = timeline;
-    player.setTimeline(timeline);
     mapRefs();
+  }
+
+  // ---- audio file: load from IndexedDB, switch between metronome and audio ----
+  function destroyAudioPlayer() {
+    if (audioPlayer) audioPlayer.destroy();
+    audioPlayer = null;
+    delete gapp.audioEl;
+  }
+
+  function useMetronomePlayer() {
+    if (player !== metroPlayer) {
+      player.stop();
+      player = metroPlayer;
+    }
+    metronomeOn = true;
+    metroPlayer.setMetronome(true);
+    if (panel) panel.setMetronomeState(true);
+  }
+
+  async function loadAudio() {
+    const gen = ++audioGen;
+    destroyAudioPlayer();
+    if (!song.audio) {
+      audioStatus = 'none';
+      useMetronomePlayer();
+      rebuildTimeline();
+      paintAudioBar();
+      return;
+    }
+    audioStatus = 'loading';
+    paintAudioBar();
+    const blob = await audioStoreGet(song.id);
+    if (gen !== audioGen) return;
+    if (!blob) {
+      audioStatus = 'missing';
+      useMetronomePlayer();
+      rebuildTimeline();
+      paintAudioBar();
+      return;
+    }
+    const lat = getDevice().latencyMs;
+    audioPlayer = createAudioPlayer({
+      timeline: buildTimeline(song, { speed: 1, anchors: audioAnchors(song.audio) }),
+      blob,
+      latencyMs: Number.isFinite(lat) ? lat : 0,
+      onFrame: (info) => onFrame(info),
+      onState: (st) => onState(st),
+      onNotice,
+      onError: (text) => showError(text),
+    });
+    if (player !== audioPlayer) metroPlayer.stop();
+    player = audioPlayer;
+    gapp.audioEl = audioPlayer.element;
+    audioStatus = 'ready';
+    metronomeOn = !!song.audio.metronome;
+    audioPlayer.setMetronome(metronomeOn);
+    audioPlayer.setRate(speed);
+    if (panel) panel.setMetronomeState(metronomeOn);
+    rebuildTimeline();
+    paintAudioBar();
+    if (player.getState() === 'stopped') idlePanel();
   }
 
   // ---- body ----
@@ -161,10 +243,11 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
   function startRecording(firstEventIndex, eventCount, label) {
     if (eventCount === 0) return;
     player.stop();
+    metroPlayer.stop();
     openRecorder({
       song,
-      player,
-      getTimeline: () => timeline,
+      player: metroPlayer,
+      getTimeline: () => plainTimeline,
       span: { firstEventIndex, eventCount, label },
       onSave: (beats) => {
         const all = song.sections.flatMap((s) => s.lines.flatMap((l) => l.chords));
@@ -201,6 +284,20 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
       }
       tools.append(domEl('button', {
         type: 'button',
+        class: 'btn small add-pause',
+        'data-sec': si,
+        onclick: () => {
+          insertPause(song, si);
+          song.timingSource = 'edited';
+          clearSelection();
+          persist();
+          buildBody();
+          rebuildTimeline();
+          showNote('Pausa aggiunta all’inizio della sezione');
+        },
+      }, '+ pausa'));
+      tools.append(domEl('button', {
+        type: 'button',
         class: 'btn small rec-sec',
         'data-sec': si,
         onclick: () => {
@@ -211,6 +308,18 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
       }, 'Registra'));
       head.append(tools);
       return;
+    }
+    if (song.audio && audioStatus !== 'none') {
+      const t = si === 0 ? song.audio.offsetSec : song.audio.anchors && song.audio.anchors[si];
+      if (t !== undefined) {
+        head.append(domEl('button', {
+          type: 'button',
+          class: 'sec-anchor',
+          'data-sec': si,
+          'aria-label': `Ancora audio: ${formatClock(t)}. Tocca per regolare`,
+          onclick: () => openSync(),
+        }, `⚓ ${formatClock(t)}`));
+      }
     }
     // long press on the header starts a section loop
     let timer = null;
@@ -452,8 +561,8 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
         event: ev,
         nextEvent,
         beatsLeft: ev && beat ? ev.startBeat + ev.beats - beat.index : 0,
-        curLabel: ev ? disp(ev.name) : undefined,
-        nextLabel: nextEvent ? disp(nextEvent.name) : undefined,
+        curLabel: ev ? evLabel(ev) : undefined,
+        nextLabel: nextEvent ? evLabel(nextEvent) : undefined,
         beatInBar: info.state === 'counting' ? timeline.events.length ? perBarIndexFromCountdown(info.countdown) : -1 : beat ? beat.beatInBar : -1,
         bpm: timeline.sections[secIdx] ? timeline.sections[secIdx].bpm : 80,
         strum,
@@ -501,7 +610,7 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
 
   function idlePanel() {
     const first = timeline.events[0] || null;
-    panel.update({ state: 'stopped', countdown: 0, event: null, nextEvent: first, nextLabel: first ? disp(first.name) : undefined, beatsLeft: 0, beatInBar: -1, bpm: timeline.sections[0] ? timeline.sections[0].bpm : 80, strum: null, strumId: null, strumCell: -1 });
+    panel.update({ state: 'stopped', countdown: 0, event: null, nextEvent: first, nextLabel: first ? evLabel(first) : undefined, beatsLeft: 0, beatInBar: -1, bpm: timeline.sections[0] ? timeline.sections[0].bpm : 80, strum: null, strumId: null, strumCell: -1 });
   }
 
   panel = createPlayPanel(song, {
@@ -518,11 +627,17 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
     },
     onSpeed: (v) => {
       speed = v;
+      // with audio the media time does not depend on the speed: only the playback rate changes
+      if (audioPlayer) audioPlayer.setRate(v);
       rebuildTimeline();
     },
     onMetronome: (on) => {
       metronomeOn = on;
       player.setMetronome(on);
+      if (player === audioPlayer && song.audio) {
+        song.audio.metronome = on;
+        persist();
+      }
     },
     onTap: () => {
       const bpm = tapTempo.tap(performance.now() / 1000);
@@ -559,13 +674,36 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
   const stepMinus = domEl('button', { type: 'button', class: 'btn icon', id: 'eb-minus', 'aria-label': 'Un battito in meno', onclick: () => stepBeats(-1) }, '−');
   const stepPlus = domEl('button', { type: 'button', class: 'btn icon', id: 'eb-plus', 'aria-label': 'Un battito in più', onclick: () => stepBeats(1) }, '+');
   const stepper = domEl('div', { class: 'eb-step', hidden: true }, stepMinus, stepVal, stepPlus, domEl('span', null, 'battiti'));
+  const delPauseBtn = domEl('button', {
+    type: 'button',
+    class: 'btn danger small',
+    id: 'eb-del-pause',
+    hidden: true,
+    onclick: () => {
+      if (!selectedRef) return;
+      const [si, li, ci] = parseRef(selectedRef);
+      if (!removePause(song, si, li, ci)) return;
+      song.timingSource = 'edited';
+      clearSelection();
+      persist();
+      buildBody();
+      rebuildTimeline();
+    },
+  }, 'Elimina pausa');
   const recAllBtn = domEl('button', { type: 'button', class: 'btn', id: 'btn-rec-all', onclick: () => startRecording(0, timeline.events.length, 'tutto il brano') }, 'Registra tutto il brano');
-  const editBar = domEl('div', { class: 'playpanel editbar', id: 'editbar', hidden: true }, editInfo, stepper, recAllBtn);
+  const editBar = domEl('div', { class: 'playpanel editbar', id: 'editbar', hidden: true }, editInfo, stepper, delPauseBtn, recAllBtn);
 
   function selectedChord() {
     if (!selectedRef) return null;
     const [s, l, c] = parseRef(selectedRef);
     return song.sections[s].lines[l].chords[c];
+  }
+
+  function clearSelection() {
+    selectedRef = null;
+    stepper.hidden = true;
+    delPauseBtn.hidden = true;
+    editInfo.textContent = 'Tocca un accordo per cambiarne i battiti';
   }
 
   function selectChord(ref) {
@@ -575,8 +713,9 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
     const el = bodyHolder.querySelector(`.ch[data-ref="${ref}"]`);
     if (el) el.classList.add('sel');
     const chord = selectedChord();
-    editInfo.textContent = `Accordo ${disp(chord.name)}`;
+    editInfo.textContent = chord.rest ? 'Pausa' : `Accordo ${disp(chord.name)}`;
     stepper.hidden = false;
+    delPauseBtn.hidden = !chord.rest;
     stepVal.textContent = String(chord.beats);
   }
 
@@ -603,9 +742,7 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
       editBtn.textContent = editMode ? 'Fine modifica' : 'Modifica durate';
       player.setLoop(null);
       player.stop();
-      selectedRef = null;
-      stepper.hidden = true;
-      editInfo.textContent = 'Tocca un accordo per cambiarne i battiti';
+      clearSelection();
       panel.el.hidden = editMode;
       editBar.hidden = !editMode;
       buildBody();
@@ -659,6 +796,62 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
     domEl('button', { type: 'button', class: 'btn icon', id: 'btn-font-down', 'aria-label': 'Testo più piccolo', onclick: () => setScale(song.view.fontScale - 0.1) }, 'A−'),
     domEl('button', { type: 'button', class: 'btn icon', id: 'btn-font-up', 'aria-label': 'Testo più grande', onclick: () => setScale(song.view.fontScale + 0.1) }, 'A+'),
     themeBtn);
+
+  // ---- audio bar: add / sync the audio file, missing file ----
+  const audioBar = domEl('div', { class: 'audio-bar', id: 'audio-bar' });
+  const reloadInput = domEl('input', {
+    type: 'file', id: 'audio-reload', class: 'file-input', accept: AUDIO_ACCEPT,
+    onchange: async () => {
+      const file = reloadInput.files && reloadInput.files[0];
+      reloadInput.value = '';
+      if (!file) return;
+      showNote('Carico «' + file.name + '»…');
+      const r = await attachAudioFile(song, file, () => window.confirm('Questo file è diverso da quello di prima (nome o dimensione). Tenere l’inizio e le ancore già fissati?'));
+      if (!r.ok) {
+        showError(r.error);
+        return;
+      }
+      showNote(r.kept ? 'Audio ricaricato: inizio e ancore conservati.' : 'Audio caricato.');
+      persist();
+      buildBody();
+      await loadAudio();
+    },
+  });
+  function paintAudioBar() {
+    domClear(audioBar);
+    const a = song.audio;
+    const syncBtn = domEl('button', { type: 'button', class: 'btn', id: 'btn-sync', onclick: () => openSync() }, a ? 'Sincronizza audio' : 'Aggiungi audio');
+    if (!a) {
+      audioBar.append(syncBtn);
+    } else if (audioStatus === 'missing') {
+      audioBar.append(
+        domEl('span', { class: 'audio-state error', id: 'audio-state' }, `Audio mancante: ricarica «${a.fileName}»`),
+        domEl('label', { class: 'btn primary', for: 'audio-reload', id: 'btn-audio-reload' }, 'Ricarica audio'),
+        syncBtn);
+    } else {
+      audioBar.append(
+        domEl('span', { class: 'audio-state', id: 'audio-state' }, audioStatus === 'loading' ? 'Carico l’audio…' : `Audio: ${a.fileName}`),
+        syncBtn);
+    }
+    audioBar.append(reloadInput);
+  }
+
+  function openSync() {
+    if (editMode) return;
+    player.stop();
+    metroPlayer.stop();
+    audioGen++;
+    destroyAudioPlayer();
+    openSyncScreen({
+      song,
+      persist,
+      onClose: () => {
+        refreshBpmButtons();
+        buildBody();
+        loadAudio();
+      },
+    });
+  }
 
   const dgHolder = domEl('div', { class: 'dg-holder' });
   const buildDiagrams = () => {
@@ -718,7 +911,8 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
       trRow,
       dgHolder,
       settingsHolder,
-      domEl('div', { class: 'tools' }, collapseBtn, editBtn)),
+      domEl('div', { class: 'tools' }, collapseBtn, editBtn),
+      audioBar),
     notice,
     bodyHolder,
     warnings,
@@ -735,6 +929,7 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
             showError(err.message);
             return;
           }
+          audioStoreDelete(song.id);
           onDeleted();
         },
       }, 'Elimina brano')),
@@ -763,10 +958,14 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
   idlePanel();
   panel.setPlayLabel('stopped');
   syncPad();
+  paintAudioBar();
+  if (song.audio) loadAudio();
 
   activeScreen = {
     destroy() {
-      player.destroy();
+      audioGen++;
+      metroPlayer.destroy();
+      destroyAudioPlayer();
       if (resizeObs) resizeObs.disconnect();
       for (const ev of ['wheel', 'touchstart', 'touchmove', 'keydown']) window.removeEventListener(ev, noteManualScroll);
       if (window.__gapp === gapp) delete window.__gapp;

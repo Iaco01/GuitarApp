@@ -297,3 +297,45 @@ h1, h2, h3, p, ul, ol, dl, dd { margin: 0; }
 .playpanel.pp-nodg .pp-dg { display: none; }
 .capo-free { display: flex; align-items: center; gap: 8px; min-height: 44px; font-size: 16px; }
 .capo-free select { min-height: 44px; padding: 0 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--fg); font: 16px var(--ui); }
+
+/* Rest bars and anchors */
+.ch.rest { border-style: dashed; font-weight: 600; font-style: italic; }
+.ch.rest.cur { color: var(--bg); }
+.sec-anchor {
+  appearance: none; min-height: 44px; min-width: 44px; padding: 0 10px; border: 1px dashed var(--line); border-radius: 10px;
+  background: transparent; color: var(--muted); font: 600 14px var(--ui); cursor: pointer;
+}
+
+/* Calibration */
+.cal-stage { display: flex; justify-content: center; padding: 20px 0; }
+.cal-dot { width: 120px; height: 120px; border-radius: 50%; border: 4px solid var(--line); background: transparent; }
+.cal-dot.on { background: var(--accent); border-color: var(--accent); }
+.cal-row { display: flex; align-items: center; gap: 8px; }
+.cal-row input[type="range"] { flex: 1 1 auto; min-width: 0; min-height: 44px; }
+.cal-val { min-width: 64px; text-align: right; font: 700 16px var(--mono); }
+
+/* Audio sync screen */
+.sync-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.sync-transport { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); position: sticky; top: 0; z-index: 2; }
+.sync-transport .row, .sync-box .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.sync-transport input[type="range"] { width: 100%; min-height: 32px; }
+.sync-pos { font: 700 18px var(--mono); text-align: center; }
+.sync-box { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
+.sync-box h3 { font-size: 16px; }
+.sync-dyn { display: grid; gap: 12px; }
+.sync-tap { flex: none; min-height: 140px; font-size: 32px; }
+.sync-offset { font: 700 16px var(--mono); }
+.sync-fine .btn { flex: 1; }
+.sync-next { min-height: 72px; font-size: 20px; }
+.sync-rows { list-style: none; padding: 0; display: grid; gap: 8px; }
+.sync-rows li { display: grid; gap: 4px; padding: 8px; border: 1px solid var(--line); border-radius: 10px; }
+.sync-rows li.has { border-color: var(--accent); }
+.sync-row-top { display: flex; justify-content: space-between; gap: 8px; font-weight: 700; }
+.sync-row-time { font: 700 15px var(--mono); }
+.sync-bpm { font: 600 14px var(--ui); }
+.sync-sug { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px; border: 1px solid var(--accent); border-radius: 10px; font-size: 15px; }
+.sync-file-name { font-weight: 700; overflow-wrap: anywhere; }
+
+.audio-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.audio-state { font-size: 14px; color: var(--muted); overflow-wrap: anywhere; }
+.audio-state.error { color: var(--danger); font-weight: 600; }
