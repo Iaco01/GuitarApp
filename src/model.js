@@ -28,7 +28,7 @@ export function createSong(partial = {}) {
     sections: [],
     transpose: 0,
     timingSource: 'default',
-    view: { fontScale: 1, theme: 'dark', collapseRepeats: true, beatsPerChord: 4 },
+    view: { fontScale: 1, theme: 'dark', collapseRepeats: true, beatsPerChord: 4, showShapes: false },
     source: { fileName: '', importedAt: now },
     importInfo: { method: 'spans', warnings: [] },
     updatedAt: now,

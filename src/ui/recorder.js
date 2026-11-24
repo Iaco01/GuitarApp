@@ -5,6 +5,7 @@ import { domEl, domClear } from './dom.js';
 import { chordColorVar } from '../render.js';
 import { quantizeTaps, suspiciousDurations } from '../taprecord.js';
 import { beatPositionAtTime } from '../timeline.js';
+import { displayChordName } from '../transpose.js';
 
 // Opens the overlay. `span` = { firstEventIndex, eventCount, label }. `player` is the shared
 // player; `getTimeline()` returns the current timeline. `onSave(beats)` receives the new
@@ -51,10 +52,10 @@ export function openRecorder({ song, player, getTimeline, span, onSave, onClose 
     } else {
       status.textContent = `Accordo ${Math.min(done + 1, span.eventCount)} di ${span.eventCount}`;
     }
-    expName.textContent = e ? e.name : '';
+    expName.textContent = e ? displayChordName(song, e.name) : '';
     if (e) expName.style.setProperty('--cc', chordColorVar(song, e.name));
     const hasNext = done + 1 < span.eventCount;
-    nextName.textContent = hasNext && n ? 'Poi: ' + n.name : done + 1 === span.eventCount ? 'Ultimo accordo: tocca per chiuderlo' : '';
+    nextName.textContent = hasNext && n ? 'Poi: ' + displayChordName(song, n.name) : done + 1 === span.eventCount ? 'Ultimo accordo: tocca per chiuderlo' : '';
     if (st === 'counting' || st === 'playing') seen = true;
     if (seen && st === 'stopped' && !finished) finish(false);
   }
@@ -90,7 +91,7 @@ export function openRecorder({ song, player, getTimeline, span, onSave, onClose 
       const ev = events[span.firstEventIndex + k];
       if (beats !== ev.beats) changed++;
       rows.append(domEl('li', { class: (beats !== ev.beats ? 'chg' : '') + (odd[k] ? ' warn' : '') },
-        domEl('span', { class: 'rec-row-name', style: { '--cc': chordColorVar(song, ev.name) } }, ev.name),
+        domEl('span', { class: 'rec-row-name', style: { '--cc': chordColorVar(song, ev.name) } }, displayChordName(song, ev.name)),
         odd[k] ? domEl('span', { class: 'rec-warn' }, 'forse hai saltato un tocco qui') : null,
         domEl('span', { class: 'rec-row-val' }, `${ev.beats} → ${beats}`)));
     });

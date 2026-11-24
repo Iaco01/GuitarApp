@@ -1,7 +1,7 @@
 // Bootstrap and hash routing: "#/" is the library, "#/song/<id>" is a song.
 
 import { parseSongFromMht } from './parser.js';
-import { getSong, saveSong, listSongs } from './storage.js';
+import { getSong, saveSong, listSongs, markOpened } from './storage.js';
 import { migrateSong, sameChordStructure, readChordBeats, findDuplicateSongs } from './model.js';
 import { choiceDialog } from './ui/dialog.js';
 import { showLibraryScreen, formatDateIt } from './ui/library.js';
@@ -79,6 +79,7 @@ function routeNow(message) {
     const song = stored ? migrateSong(stored) : null;
     if (song && Array.isArray(song.sections)) {
       window.scrollTo(0, 0);
+      markOpened(song.id);
       showSongScreen(appRoot, song, {
         onBack: () => { window.location.hash = '#/'; },
         onDeleted: () => { window.location.hash = '#/'; },

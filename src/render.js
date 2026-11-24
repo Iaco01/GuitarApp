@@ -3,6 +3,7 @@
 import { domEl } from './ui/dom.js';
 import { buildLineGroups } from './segments.js';
 import { groupRepeatedSections, baseSectionName, effectiveSectionBpms } from './model.js';
+import { displayChordName } from './transpose.js';
 
 export const CHORD_PALETTE_SIZE = 10;
 
@@ -11,25 +12,18 @@ export function chordColorVar(song, name) {
   return `var(--c${(i < 0 ? 0 : i) % CHORD_PALETTE_SIZE})`;
 }
 
-export function renderChordChip(song, name, onTap) {
-  return domEl('button', {
-    type: 'button',
-    class: 'chip',
-    'data-chord': name,
-    style: { '--cc': chordColorVar(song, name) },
-    onclick: () => onTap && onTap(null, name),
-  }, name);
-}
-
 function renderChordLabel(song, chord, ref, onTap, showBeats) {
+  // shown name follows transposition and the capo shapes view; the colour stays tied to the written chord
+  const shown = displayChordName(song, chord.name);
   const label = domEl('span', {
     class: 'ch',
     role: 'button',
     tabindex: '0',
-    'data-chord': chord.name,
+    'data-chord': shown,
+    'data-orig': chord.name,
     'data-ref': ref,
     style: { '--cc': chordColorVar(song, chord.name) },
-  }, chord.name, chord.mark ? domEl('sup', { class: 'mk' }, chord.mark) : null,
+  }, shown, chord.mark ? domEl('sup', { class: 'mk' }, chord.mark) : null,
   showBeats ? domEl('span', { class: 'bt' }, String(chord.beats)) : null);
   const fire = () => onTap && onTap(ref, chord.name);
   label.addEventListener('click', fire);
@@ -48,7 +42,7 @@ export function renderLine(song, line, sectionIndex, lineIndex, onTap, showBeats
   const renderSeg = (s) => {
     const chord = line.chords[s.index];
     const ref = `${sectionIndex}.${lineIndex}.${s.index}`;
-    const width = chord.name.length + (chord.mark ? chord.mark.length : 0) + 1;
+    const width = displayChordName(song, chord.name).length + (chord.mark ? chord.mark.length : 0) + 1;
     return domEl('span', { class: 'seg', style: { minWidth: width + 'ch' } },
       renderChordLabel(song, chord, ref, onTap, showBeats),
       domEl('span', { class: 'ly' }, s.text));

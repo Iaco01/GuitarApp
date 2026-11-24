@@ -2,7 +2,8 @@
 
 import { domEl } from './dom.js';
 
-export function choiceDialog({ title, message, buttons, cancel = null }) {
+// `details` (optional) is a list of short lines shown under the message.
+export function choiceDialog({ title, message, details = null, buttons, cancel = null }) {
   return new Promise((resolve) => {
     const done = (value) => {
       overlay.remove();
@@ -16,6 +17,7 @@ export function choiceDialog({ title, message, buttons, cancel = null }) {
       domEl('div', { class: 'sheet-card dlg' },
         domEl('h2', { class: 'dlg-title' }, title),
         message ? domEl('p', { class: 'dlg-msg' }, message) : null,
+        details && details.length ? domEl('ul', { class: 'dlg-details' }, details.map((d) => domEl('li', null, d))) : null,
         domEl('div', { class: 'dlg-btns' }, buttons.map((b) => domEl('button', {
           type: 'button',
           class: 'btn' + (b.primary ? ' primary' : ''),

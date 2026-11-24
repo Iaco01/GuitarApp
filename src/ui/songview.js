@@ -1,13 +1,15 @@
 // Song screen: header, settings, body with chords above lyrics, playback panel, duration editing.
 
 import { domEl, domClear } from './dom.js';
-import { renderSongBody, renderChordChip, formatBpm } from '../render.js';
+import { renderSongBody, formatBpm } from '../render.js';
 import { saveSong, deleteSong } from '../storage.js';
 import { buildTimeline } from '../timeline.js';
 import { createPlayer } from '../player.js';
 import { createPlayPanel } from './playpanel.js';
 import { openRecorder } from './recorder.js';
 import { createTapTempo } from '../taprecord.js';
+import { displayChordName } from '../transpose.js';
+import { openChordSheet, openCapoSheet, renderDiagramRow, smallDiagramSvg } from './chordsheet.js';
 import { effectiveSectionBpms, groupRepeatedSections, setAllChordBeats, sectionSignature, baseSectionName } from '../model.js';
 
 const FONT_MIN = 0.7;
@@ -18,6 +20,7 @@ const BEATS_MIN = 1;
 const BEATS_MAX = 32;
 const LONG_PRESS_MS = 500;
 const MANUAL_SCROLL_PAUSE_MS = 4000;
+const TRANSPOSE_MAX = 12;
 
 let activeScreen = null;
 
@@ -34,25 +37,6 @@ function clampScale(v) {
 export function applyTheme(theme) {
   if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme;
   else delete document.documentElement.dataset.theme;
-}
-
-// Hook for round 3 (chord diagrams): called with (ref, chordName) when a chord is tapped.
-function openChordSheet(ref, name) {
-  const close = () => {
-    sheet.remove();
-    document.removeEventListener('keydown', onKey);
-  };
-  const onKey = (e) => {
-    if (e.key === 'Escape') close();
-  };
-  const sheet = domEl('div', { class: 'sheet', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Accordo ' + name, onclick: (e) => { if (e.target === sheet) close(); } },
-    domEl('div', { class: 'sheet-card' },
-      domEl('div', { class: 'sheet-name', id: 'sheet-name' }, name),
-      domEl('p', { class: 'muted' }, 'Diagramma non ancora disponibile'),
-      domEl('button', { type: 'button', class: 'btn primary', onclick: close }, 'Chiudi')));
-  document.addEventListener('keydown', onKey);
-  document.body.append(sheet);
-  sheet.querySelector('button').focus();
 }
 
 const SUN_ICON = '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg>';
@@ -84,6 +68,7 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
   const openedDetails = new Set();
   const tapTempo = createTapTempo();
 
+  const disp = (name) => displayChordName(song, name);
   const notice = domEl('div', { class: 'msg', role: 'alert' });
   const showError = (text) => {
     notice.textContent = text;
@@ -151,7 +136,7 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
       if (i >= 0) player.playFromEvent(i);
       return;
     }
-    openChordSheet(ref, name);
+    openChordSheet(song, name);
   }
 
   function sectionNameOf(i) {
@@ -336,7 +321,7 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
     const items = [];
     if (song.difficulty) items.push(['Difficoltà', song.difficulty]);
     if (song.tuning) items.push(['Accordatura', song.tuning]);
-    items.push(['Capotasto', song.capo ? String(song.capo) : 'nessuno']);
+    items.push(['Capotasto', song.capo ? (song.view.showShapes ? `${song.capo} — forme` : String(song.capo)) : 'nessuno']);
     if (song.key) items.push(['Tonalità', song.key]);
     const dl = domEl('dl', { class: 'meta' });
     for (const [k, v] of items) dl.append(domEl('div', null, domEl('dt', null, k), domEl('dd', null, v)));
@@ -466,6 +451,8 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
         event: ev,
         nextEvent,
         beatsLeft: ev && beat ? ev.startBeat + ev.beats - beat.index : 0,
+        curLabel: ev ? disp(ev.name) : undefined,
+        nextLabel: nextEvent ? disp(nextEvent.name) : undefined,
         beatInBar: info.state === 'counting' ? timeline.events.length ? perBarIndexFromCountdown(info.countdown) : -1 : beat ? beat.beatInBar : -1,
         bpm: timeline.sections[secIdx] ? timeline.sections[secIdx].bpm : 80,
         strum,
@@ -506,12 +493,18 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
       openedDetails.clear();
       lastKey = '';
       lastEvKey = '';
-      if (panel) panel.update({ state: 'stopped', countdown: 0, event: null, nextEvent: timeline.events[0] || null, beatsLeft: 0, beatInBar: -1, bpm: timeline.sections[0] ? timeline.sections[0].bpm : 80, strum: null, strumId: null, strumCell: -1 });
+      idlePanel();
       if (panel) panel.setProgress(0);
     }
   }
 
+  function idlePanel() {
+    const first = timeline.events[0] || null;
+    panel.update({ state: 'stopped', countdown: 0, event: null, nextEvent: first, nextLabel: first ? disp(first.name) : undefined, beatsLeft: 0, beatInBar: -1, bpm: timeline.sections[0] ? timeline.sections[0].bpm : 80, strum: null, strumId: null, strumCell: -1 });
+  }
+
   panel = createPlayPanel(song, {
+    diagramSvg: smallDiagramSvg,
     onPlayPause: () => {
       const st = player.getState();
       if (st === 'playing' || st === 'counting') player.pause();
@@ -571,7 +564,7 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
     const el = bodyHolder.querySelector(`.ch[data-ref="${ref}"]`);
     if (el) el.classList.add('sel');
     const chord = selectedChord();
-    editInfo.textContent = `Accordo ${chord.name}`;
+    editInfo.textContent = `Accordo ${disp(chord.name)}`;
     stepper.hidden = false;
     stepVal.textContent = String(chord.beats);
   }
@@ -656,8 +649,46 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
     domEl('button', { type: 'button', class: 'btn icon', id: 'btn-font-up', 'aria-label': 'Testo più grande', onclick: () => setScale(song.view.fontScale + 0.1) }, 'A+'),
     themeBtn);
 
-  const chips = domEl('div', { class: 'chips', 'aria-label': 'Accordi usati' },
-    song.chords.map((c) => renderChordChip(song, c, openChordSheet)));
+  const dgHolder = domEl('div', { class: 'dg-holder' });
+  const buildDiagrams = () => {
+    domClear(dgHolder);
+    dgHolder.append(renderDiagramRow(song, (name) => openChordSheet(song, name)));
+  };
+
+  // ---- transposition and capo ----
+  const trInd = domEl('button', { type: 'button', class: 'btn tr-ind', id: 'tr-indicator', onclick: () => setTranspose(0) });
+  const trDown = domEl('button', { type: 'button', class: 'btn icon', id: 'btn-tr-down', 'aria-label': 'Mezzo tono più basso', onclick: () => setTranspose(song.transpose - 1) }, '−');
+  const trUp = domEl('button', { type: 'button', class: 'btn icon', id: 'btn-tr-up', 'aria-label': 'Mezzo tono più alto', onclick: () => setTranspose(song.transpose + 1) }, '+');
+  const capoBtn = domEl('button', { type: 'button', class: 'btn', id: 'btn-capo', onclick: () => openCapoSheet(song, onCapoChanged) });
+  function paintTranspose() {
+    const t = song.transpose || 0;
+    trInd.textContent = t === 0 ? 'Originale' : (t > 0 ? '+' : '−') + Math.abs(t);
+    trInd.dataset.tr = String(t);
+    trInd.setAttribute('aria-label', t === 0 ? 'Tonalità originale' : `Trasposto di ${t} semitoni: tocca per tornare all’originale`);
+    capoBtn.textContent = song.capo ? (song.view.showShapes ? `Capo ${song.capo} — forme` : `Capo ${song.capo}`) : 'Capotasto';
+  }
+  // Redraws everything that shows chord names (after transposition, capo or shapes view changes).
+  function refreshChords() {
+    song.transpose = Math.max(-TRANSPOSE_MAX, Math.min(TRANSPOSE_MAX, song.transpose || 0));
+    paintTranspose();
+    buildMeta();
+    buildDiagrams();
+    buildBody();
+    rebuildTimeline();
+    lastKey = '';
+    lastEvKey = '';
+    curLine = null;
+    if (player.getState() === 'stopped') idlePanel();
+    persist();
+  }
+  function setTranspose(v) {
+    song.transpose = Math.max(-TRANSPOSE_MAX, Math.min(TRANSPOSE_MAX, v));
+    refreshChords();
+  }
+  function onCapoChanged() {
+    refreshChords();
+  }
+  const trRow = domEl('div', { class: 'tr-row' }, domEl('span', { class: 'tr-lbl' }, 'Tono'), trDown, trInd, trUp, capoBtn);
 
   const warnings = song.importInfo && song.importInfo.warnings && song.importInfo.warnings.length
     ? domEl('details', { class: 'warnings' },
@@ -673,7 +704,8 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
       domEl('h1', { id: 'song-title' }, song.title),
       song.artist ? domEl('p', { class: 'artist', id: 'song-artist' }, song.artist) : null,
       metaHolder,
-      chips,
+      trRow,
+      dgHolder,
       settingsHolder,
       domEl('div', { class: 'tools' }, collapseBtn, editBtn)),
     notice,
@@ -713,9 +745,11 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
   paintTheme();
   buildMeta();
   buildSettings();
+  buildDiagrams();
+  paintTranspose();
   buildBody();
   root.append(screen);
-  panel.update({ state: 'stopped', countdown: 0, event: null, nextEvent: timeline.events[0] || null, beatsLeft: 0, beatInBar: -1, bpm: timeline.sections[0] ? timeline.sections[0].bpm : 80, strum: null, strumId: null, strumCell: -1 });
+  idlePanel();
   panel.setPlayLabel('stopped');
   syncPad();
 
