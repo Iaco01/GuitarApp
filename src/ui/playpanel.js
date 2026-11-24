@@ -7,18 +7,21 @@ import { chordColorVar, formatBpm } from '../render.js';
 const SPEED_MIN = 50;
 const SPEED_MAX = 100;
 
-export function createPlayPanel(song, { onPlayPause, onStop, onSpeed, onMetronome, onTap, speedPct = 100, metronomeOn = true }) {
+// `diagramSvg(label)` (optional) returns the small SVG of a chord shown next to its name.
+export function createPlayPanel(song, { onPlayPause, onStop, onSpeed, onMetronome, onTap, speedPct = 100, metronomeOn = true, diagramSvg = null }) {
   const perBar = (song.timeSignature && song.timeSignature[0]) || 4;
   let speed = speedPct;
   let metro = metronomeOn;
   let lastKey = '';
 
   const curName = domEl('div', { class: 'pp-cur-name', id: 'pp-current' }, '–');
+  const curDg = domEl('span', { class: 'pp-dg', id: 'pp-current-dg' });
   const curBar = domEl('div', { class: 'pp-cur-bar' }, domEl('div', { class: 'pp-cur-fill' }));
-  const cur = domEl('div', { class: 'pp-cur' }, curName, curBar);
+  const cur = domEl('div', { class: 'pp-cur' }, domEl('div', { class: 'pp-cur-main' }, curDg, curName), curBar);
   const nextName = domEl('span', { class: 'pp-next-name', id: 'pp-next' }, '–');
+  const nextDg = domEl('span', { class: 'pp-dg', id: 'pp-next-dg' });
   const nextBadge = domEl('span', { class: 'pp-badge', id: 'pp-left', title: 'Battiti al cambio' }, '');
-  const next = domEl('div', { class: 'pp-next' }, domEl('span', { class: 'pp-next-lbl' }, 'Prossimo'), nextName, nextBadge);
+  const next = domEl('div', { class: 'pp-next' }, domEl('span', { class: 'pp-next-lbl' }, 'Poi'), nextDg, nextName, nextBadge);
   const dots = [];
   const dotsEl = domEl('div', { class: 'pp-dots', 'aria-hidden': 'true' });
   for (let i = 0; i < perBar; i++) {
@@ -28,7 +31,6 @@ export function createPlayPanel(song, { onPlayPause, onStop, onSpeed, onMetronom
   }
   const bpmEl = domEl('span', { class: 'pp-bpm', id: 'pp-bpm' }, '');
   const patEl = domEl('div', { class: 'pp-pat', id: 'pp-pattern' });
-  const info = domEl('div', { class: 'pp-info' }, bpmEl, patEl);
 
   const playBtn = domEl('button', { type: 'button', class: 'btn primary pp-play', id: 'btn-play', 'aria-label': 'Avvia', onclick: onPlayPause }, 'Play');
   const stopBtn = domEl('button', { type: 'button', class: 'btn', id: 'btn-stop', 'aria-label': 'Ferma e torna all’inizio', onclick: onStop }, 'Stop');
@@ -52,12 +54,30 @@ export function createPlayPanel(song, { onPlayPause, onStop, onSpeed, onMetronom
     },
   }, metro ? 'Clic: sì' : 'Clic: no');
   const tapBtn = domEl('button', { type: 'button', class: 'btn', id: 'btn-tap', onclick: onTap }, 'Tap tempo');
-  const ctrl = domEl('div', { class: 'pp-ctrl' }, playBtn, stopBtn, speedBox, metroBtn, tapBtn);
+  const more = domEl('div', { class: 'pp-more', id: 'pp-more', hidden: true }, speedBox, metroBtn, tapBtn, stopBtn);
+  const moreBtn = domEl('button', {
+    type: 'button', class: 'btn pp-more-btn', id: 'btn-more', 'aria-label': 'Altri comandi', 'aria-expanded': 'false', 'aria-controls': 'pp-more',
+    onclick: () => {
+      more.hidden = !more.hidden;
+      moreBtn.setAttribute('aria-expanded', String(!more.hidden));
+    },
+  }, '⋯');
+  const noticeText = domEl('span', null, '');
+  const notice = domEl('div', { class: 'pp-notice', id: 'pp-notice', role: 'status', hidden: true }, noticeText,
+    domEl('button', { type: 'button', class: 'btn icon', 'aria-label': 'Chiudi avviso', onclick: () => { notice.hidden = true; } }, '×'));
 
   const el = domEl('div', { class: 'playpanel', id: 'playpanel', role: 'region', 'aria-label': 'Riproduzione' },
-    domEl('div', { class: 'pp-top' }, cur, next),
-    domEl('div', { class: 'pp-mid' }, dotsEl, info),
-    ctrl);
+    notice,
+    domEl('div', { class: 'pp-row1' }, cur, next, playBtn),
+    domEl('div', { class: 'pp-row2' }, dotsEl, bpmEl, patEl, moreBtn),
+    more);
+
+  function setDiagram(holder, label) {
+    const key = label === null || !diagramSvg ? '' : label;
+    if (holder.dataset.k === key) return;
+    holder.dataset.k = key;
+    holder.innerHTML = key ? diagramSvg(key) : '';
+  }
 
   function renderPattern(strum, activeCell) {
     domClear(patEl);
@@ -87,10 +107,14 @@ export function createPlayPanel(song, { onPlayPause, onStop, onSpeed, onMetronom
         curName.classList.add('count');
       } else {
         curName.classList.remove('count');
-        curName.textContent = d.event ? d.event.name : '–';
+        const label = d.event ? d.curLabel || d.event.name : '–';
+        curName.textContent = label;
         if (d.event) curName.style.setProperty('--cc', chordColorVar(song, d.event.name));
+        setDiagram(curDg, d.event ? label : null);
       }
-      nextName.textContent = d.nextEvent ? d.nextEvent.name : '–';
+      if (d.state === 'counting') setDiagram(curDg, null);
+      setDiagram(nextDg, d.nextEvent ? d.nextLabel || d.nextEvent.name : null);
+      nextName.textContent = d.nextEvent ? d.nextLabel || d.nextEvent.name : '–';
       nextName.style.setProperty('--cc', d.nextEvent ? chordColorVar(song, d.nextEvent.name) : 'var(--muted)');
       nextBadge.textContent = d.nextEvent && d.beatsLeft > 0 ? String(d.beatsLeft) : '';
       dots.forEach((dot, i) => dot.classList.toggle('on', d.beatInBar === i));
@@ -103,6 +127,10 @@ export function createPlayPanel(song, { onPlayPause, onStop, onSpeed, onMetronom
         const cells = patEl.children;
         for (let i = 0; i < cells.length; i++) cells[i].classList.toggle('now', i === d.strumCell);
       }
+    },
+    showNotice(text) {
+      noticeText.textContent = text;
+      notice.hidden = !text;
     },
     setProgress(p) {
       curBar.firstChild.style.width = Math.round(p * 100) + '%';

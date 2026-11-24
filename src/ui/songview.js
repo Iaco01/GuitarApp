@@ -110,7 +110,7 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
     timeSignature: song.timeSignature,
     onFrame: (info) => onFrame(info),
     onState: (st) => onState(st),
-    onNotice: (text) => showNote(text),
+    onNotice: (text) => panel.showNotice(text),
   });
 
   function rebuildTimeline() {
@@ -425,7 +425,9 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
 
   function autoScroll(line) {
     if (Date.now() < manualScrollUntil) return;
-    const target = line.getBoundingClientRect().top + window.scrollY - window.innerHeight / 3;
+    // the current line goes to 25% of the height visible above the bottom panel
+    const panelH = (editMode ? editBar : panel.el).getBoundingClientRect().height;
+    const target = line.getBoundingClientRect().top + window.scrollY - 0.25 * (window.innerHeight - panelH);
     window.scrollTo({ top: Math.max(0, target), behavior: 'smooth' });
   }
 
@@ -488,6 +490,13 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
 
   function onState(st) {
     if (panel) panel.setPlayLabel(st);
+    screen.classList.toggle('is-playing', st === 'counting' || st === 'playing');
+    if (st === 'counting' || st === 'playing') {
+      // re-apply the highlight and scroll again (layout may have changed while paused)
+      lastKey = '';
+      lastEvKey = '';
+      curLine = null;
+    }
     if (st === 'stopped') {
       if (curEl) curEl.classList.remove('cur');
       if (nextEl) nextEl.classList.remove('next');
@@ -621,6 +630,9 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
   const setScale = (v) => {
     song.view.fontScale = clampScale(v);
     screen.style.setProperty('--fs', String(song.view.fontScale));
+    curLine = null;
+    lastKey = '';
+    lastEvKey = '';
     persist();
   };
   const collapseBtn = domEl('button', {
