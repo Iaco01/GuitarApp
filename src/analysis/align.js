@@ -1,0 +1,391 @@
+// Forced alignment of the chord sequence of the sheet on the audio (pure).
+//
+// The sheet gives the exact sequence of chords. States are the events in order (left-to-right:
+// each state stays or goes to the next one) and the model is a segmental Viterbi: every event
+// covers a stretch of frames, scored by the cosine similarity between the chromagram and the chord
+// template (root, third, fifth, a little of the seventh) plus the bass, minus a soft penalty for
+// durations far from the prior (beats from the sheet x a local seconds-per-beat scale estimated
+// from the previous pass). The 12 transpositions of the sheet are tried (candidates ranked on the
+// global chroma first). Start and end of the recording are free.
+
+import { parseChord } from '../chord.js';
+import { pitchClassOf } from '../transpose.js';
+
+const G_CHROMA = 10;
+const G_BASS = 2.5;
+const COS_EPS = 0.3;
+
+const mod12 = (n) => ((n % 12) + 12) % 12;
+
+// Chord template (12 weights, L2 normalised) and bass pitch class; null for unknown names.
+export function chordTemplate(name) {
+  const c = parseChord(name);
+  if (!c) return null;
+  const root = pitchClassOf(c.root);
+  if (root < 0) return null;
+  const q = c.quality || '';
+  const w = new Float64Array(12);
+  const minor = /^(m(?!aj)|min|dim|-)/.test(q);
+  const dim = /dim|°/.test(q);
+  const aug = /aug|\+/.test(q);
+  const sus2 = /sus2/.test(q);
+  const sus4 = /sus4|sus(?!2)/.test(q);
+  const power = /^5$/.test(q);
+  w[root] = 1;
+  if (!power) {
+    if (sus2) w[mod12(root + 2)] = 0.85;
+    else if (sus4) w[mod12(root + 5)] = 0.85;
+    else w[mod12(root + (minor ? 3 : 4))] = 0.85;
+  }
+  w[mod12(root + (dim ? 6 : aug ? 8 : 7))] = 0.9;
+  if (/maj7|M7/.test(q)) w[mod12(root + 11)] = 0.5;
+  else if (/7/.test(q)) w[mod12(root + 10)] = 0.5;
+  if (/6/.test(q)) w[mod12(root + 9)] = 0.4;
+  if (/9|add9|add2/.test(q)) w[mod12(root + 2)] = Math.max(w[mod12(root + 2)], 0.4);
+  let n = 0;
+  for (let i = 0; i < 12; i++) n += w[i] * w[i];
+  n = Math.sqrt(n);
+  for (let i = 0; i < 12; i++) w[i] /= n;
+  return { root, bass: c.bass ? pitchClassOf(c.bass) : root, weights: w, key: root + '|' + Array.from(w, (v) => v.toFixed(2)).join(',') + '|' + (c.bass ? pitchClassOf(c.bass) : root) };
+}
+
+// Shifted copy of a template (the recording is `shift` semitones above the sheet).
+function shiftedTemplate(t, shift) {
+  const w = new Float64Array(12);
+  for (let i = 0; i < 12; i++) w[mod12(i + shift)] = t.weights[i];
+  return { root: mod12(t.root + shift), bass: mod12(t.bass + shift), weights: w };
+}
+
+// events: [{ name, rest }] -> { chordOf: Int32Array (index in `chords`, -1 for rests/unknown), chords: [template] }
+export function buildChordSet(events) {
+  const chords = [];
+  const byKey = new Map();
+  const chordOf = new Int32Array(events.length).fill(-1);
+  events.forEach((ev, j) => {
+    if (ev.rest) return;
+    const t = chordTemplate(ev.name);
+    if (!t) return;
+    let idx = byKey.get(t.key);
+    if (idx === undefined) {
+      idx = chords.length;
+      chords.push(t);
+      byKey.set(t.key, idx);
+    }
+    chordOf[j] = idx;
+  });
+  return { chordOf, chords };
+}
+
+// Per-frame cosine of every chord (cos) and the centred emission (em), as flat arrays
+// [chord * frames + t], plus cumulative sums with `frames + 1` entries per chord.
+function emissions(feat, chords, shift) {
+  const T = feat.frames;
+  const D = chords.length;
+  const cos = new Float32Array(D * T);
+  const em = new Float32Array(D * T);
+  const tpl = chords.map((c) => shiftedTemplate(c, shift));
+  const zc = new Float64Array(D);
+  const zb = new Float64Array(D);
+  for (let t = 0; t < T; t++) {
+    let n2 = 0;
+    for (let k = 0; k < 12; k++) n2 += feat.chroma[t * 12 + k] ** 2;
+    const inv = 1 / (Math.sqrt(n2) + COS_EPS);
+    let bs = 0;
+    for (let k = 0; k < 12; k++) bs += feat.bass[t * 12 + k];
+    const binv = 1 / (bs + 0.5);
+    let mc = 0;
+    let mb = 0;
+    for (let c = 0; c < D; c++) {
+      let s = 0;
+      for (let k = 0; k < 12; k++) s += feat.chroma[t * 12 + k] * tpl[c].weights[k];
+      zc[c] = s * inv;
+      zb[c] = feat.bass[t * 12 + tpl[c].bass] * binv;
+      mc += zc[c];
+      mb += zb[c];
+    }
+    mc /= D;
+    mb /= D;
+    for (let c = 0; c < D; c++) {
+      cos[c * T + t] = zc[c];
+      em[c * T + t] = G_CHROMA * (zc[c] - mc) + G_BASS * (zb[c] - mb);
+    }
+  }
+  return { cos, em, D, T };
+}
+
+function cumulative(a, D, T) {
+  const out = new Float64Array(D * (T + 1));
+  for (let c = 0; c < D; c++) {
+    let s = 0;
+    for (let t = 0; t < T; t++) {
+      out[c * (T + 1) + t] = s;
+      s += a[c * T + t];
+    }
+    out[c * (T + 1) + T] = s;
+  }
+  return out;
+}
+
+// Segmental Viterbi over boundaries on a grid of `stride` frames. Event j ends at boundary
+// u in [lo[j], hi[j]]; its length in grid units is in [dmin[j], dmax[j]]. Returns the end
+// boundary (in grid units) of every event, and the start of the first, with the total score.
+function viterbi({ cumE, T, chordOf, N, stride, lo, hi, dmin, dmax, expected, sigma, lambda, bonus, kappa }) {
+  const U = Math.floor(T / stride);
+  const Tp = T + 1;
+  const back = new Int16Array(N * (U + 1)).fill(-1);
+  let prev = new Float64Array(U + 1);
+  let cur = new Float64Array(U + 1);
+  for (let u = 0; u <= U; u++) prev[u] = kappa * (bonus ? bonus[u * stride] : 0);
+  for (let j = 0; j < N; j++) {
+    cur.fill(-Infinity);
+    const c = chordOf[j];
+    const base = c >= 0 ? c * Tp : -1;
+    const dlo = Math.max(1, dmin[j]);
+    const dhi = Math.max(dlo, dmax[j]);
+    const pen = new Float64Array(dhi - dlo + 1);
+    for (let d = dlo; d <= dhi; d++) {
+      const r = Math.log((d * stride) / expected[j]);
+      pen[d - dlo] = (lambda * r * r) / (2 * sigma * sigma);
+    }
+    const last = j === N - 1;
+    for (let u = lo[j]; u <= Math.min(U, hi[j]); u++) {
+      let best = -Infinity;
+      let arg = -1;
+      for (let d = dlo; d <= dhi; d++) {
+        const u0 = u - d;
+        if (u0 < 0) break;
+        const fp = prev[u0];
+        if (fp === -Infinity) continue;
+        const seg = base >= 0 ? cumE[base + u * stride] - cumE[base + u0 * stride] : 0;
+        const v = fp + seg - pen[d - dlo];
+        if (v > best) { best = v; arg = d; }
+      }
+      if (arg >= 0) {
+        cur[u] = best + (last ? 0 : kappa * (bonus ? bonus[u * stride] : 0));
+        back[j * (U + 1) + u] = arg;
+      }
+    }
+    const t = prev; prev = cur; cur = t;
+  }
+  let bu = -1;
+  let bv = -Infinity;
+  for (let u = 0; u <= U; u++) if (prev[u] > bv) { bv = prev[u]; bu = u; }
+  if (bu < 0) return null;
+  const ends = new Int32Array(N);
+  let u = bu;
+  for (let j = N - 1; j >= 0; j--) {
+    ends[j] = u;
+    u -= back[j * (U + 1) + u];
+  }
+  return { ends, start0: u, score: bv, stride };
+}
+
+// Local seconds-per-prior-beat of every event (median of d / prior over +-`half` neighbours).
+function localScales(durFrames, priorBeats, rest, half, fallback) {
+  const N = durFrames.length;
+  const out = new Float64Array(N);
+  const ratios = durFrames.map((d, j) => (rest[j] || !(priorBeats[j] > 0) ? NaN : d / priorBeats[j]));
+  const all = ratios.filter(Number.isFinite).sort((a, b) => a - b);
+  const g = all.length ? all[Math.floor(all.length / 2)] : fallback;
+  for (let j = 0; j < N; j++) {
+    const w = [];
+    for (let k = Math.max(0, j - half); k <= Math.min(N - 1, j + half); k++) if (Number.isFinite(ratios[k])) w.push(ratios[k]);
+    w.sort((a, b) => a - b);
+    const m = w.length ? w[Math.floor(w.length / 2)] : g;
+    out[j] = Math.min(g * 4, Math.max(g / 4, m));
+  }
+  return out;
+}
+
+// Bonus for a boundary at every frame boundary: strongest onset within +-win seconds.
+function boundaryBonus(onset, onsetFps, fps, T, win, cap) {
+  const b = new Float32Array(T + 1);
+  for (let f = 0; f <= T; f++) {
+    const tc = (f - 0.5) / fps;
+    const i0 = Math.max(0, Math.floor((tc - win) * onsetFps));
+    const i1 = Math.min(onset.length - 1, Math.ceil((tc + win) * onsetFps));
+    let m = 0;
+    for (let i = i0; i <= i1; i++) if (onset[i] > m) m = onset[i];
+    b[f] = Math.min(cap, m);
+  }
+  return b;
+}
+
+// Global ranking of the 12 transpositions from the mean chroma: returns the shifts sorted by
+// decreasing correlation between the mean chroma and the chord-weighted template profile.
+export function rankTranspositions(feat, events, chordSet, priorBeats) {
+  const T = feat.frames;
+  const mean = new Float64Array(12);
+  for (let t = 0; t < T; t++) for (let k = 0; k < 12; k++) mean[k] += feat.chroma[t * 12 + k];
+  const prof = new Float64Array(12);
+  events.forEach((ev, j) => {
+    const c = chordSet.chordOf[j];
+    if (c < 0) return;
+    const w = priorBeats[j] > 0 ? priorBeats[j] : 1;
+    for (let k = 0; k < 12; k++) prof[k] += w * chordSet.chords[c].weights[k];
+  });
+  const corr = (a, b) => {
+    let ma = 0, mb = 0;
+    for (let k = 0; k < 12; k++) { ma += a[k]; mb += b[k]; }
+    ma /= 12; mb /= 12;
+    let s = 0, na = 0, nb = 0;
+    for (let k = 0; k < 12; k++) { s += (a[k] - ma) * (b[k] - mb); na += (a[k] - ma) ** 2; nb += (b[k] - mb) ** 2; }
+    return s / (Math.sqrt(na * nb) + 1e-12);
+  };
+  const out = [];
+  for (let sh = 0; sh < 12; sh++) {
+    const shifted = new Float64Array(12);
+    for (let k = 0; k < 12; k++) shifted[mod12(k + sh)] = prof[k];
+    out.push({ shift: sh, corr: corr(mean, shifted) });
+  }
+  return out.sort((a, b) => b.corr - a.corr);
+}
+
+// Aligns `events` ([{ name, rest, priorBeats }]) on the features. Options:
+//   shift: semitones the recording is above the sheet (default: search),
+//   candidates: how many transpositions are tried in full (default 3, plus 0).
+// Returns { startSec[], endSec[], confidence[], shift, shiftMargin, score, scales } or null.
+export function alignEvents(feat, events, options = {}) {
+  const N = events.length;
+  if (N === 0 || feat.frames < 10) return null;
+  const fps = feat.fps;
+  const T = feat.frames;
+  const priorBeats = events.map((e) => (e.priorBeats > 0 ? e.priorBeats : 4));
+  const rest = events.map((e) => !!e.rest);
+  const chordSet = buildChordSet(events);
+  const bonus = options.onset ? boundaryBonus(options.onset, feat.onsetFps, fps, T, 0.06, 6) : null;
+  const kappa = options.kappa ?? 0.5;
+  const sumPrior = priorBeats.reduce((a, b) => a + b, 0);
+  const s0 = (T * 0.95) / sumPrior; // frames per prior beat, whole recording
+
+  const run = (shift, stages) => {
+    const em = emissions(feat, chordSet.chords, shift);
+    const cumE = cumulative(em.em, em.D, T);
+    let scales = new Float64Array(N).fill(s0);
+    let res = null;
+    let strideNow = 2;
+    for (const st of stages) {
+      const stride = st.stride;
+      const U = Math.floor(T / stride);
+      const lo = new Int32Array(N);
+      const hi = new Int32Array(N).fill(U);
+      const dmin = new Int32Array(N);
+      const dmax = new Int32Array(N);
+      const expected = new Float64Array(N);
+      for (let j = 0; j < N; j++) {
+        const m = rest[j] ? Math.max(priorBeats[j] * scales[j], 1) : priorBeats[j] * scales[j];
+        expected[j] = Math.max(m, stride);
+        dmin[j] = Math.max(1, Math.floor((st.dminF * m) / stride));
+        dmax[j] = Math.max(dmin[j] + 1, Math.ceil((st.dmaxF * m) / stride));
+        if (res && st.band) {
+          const centre = (res.ends[j] * res.stride) / stride;
+          const w = (st.band * fps) / stride;
+          lo[j] = Math.max(0, Math.floor(centre - w));
+          hi[j] = Math.min(U, Math.ceil(centre + w));
+        }
+      }
+      const r = viterbi({ cumE, T, chordOf: chordSet.chordOf, N, stride, lo, hi, dmin, dmax, expected, sigma: st.sigma, lambda: options.lambda ?? 8, bonus, kappa });
+      if (!r) return null;
+      res = r;
+      strideNow = stride;
+      const durs = Array.from(res.ends, (e, j) => (e - (j ? res.ends[j - 1] : res.start0)) * stride);
+      scales = localScales(durs, priorBeats, rest, 6, s0);
+    }
+    return { res, em, cumE, scales, stride: strideNow };
+  };
+
+  let shifts;
+  if (Number.isInteger(options.shift)) shifts = [options.shift];
+  else {
+    const rank = rankTranspositions(feat, events, chordSet, priorBeats);
+    const set = new Set(rank.slice(0, options.candidates ?? 3).map((r) => r.shift));
+    set.add(0);
+    shifts = Array.from(set);
+  }
+  const coarse = [{ stride: 2, dminF: 0.2, dmaxF: 5, sigma: 1.0 }];
+  const results = [];
+  for (const sh of shifts) {
+    const r = run(sh, coarse);
+    if (r) results.push({ shift: sh, score: r.res.score });
+  }
+  if (!results.length) return null;
+  results.sort((a, b) => b.score - a.score);
+  const shift = results[0].shift;
+  const shiftMargin = results.length > 1 ? results[0].score - results[1].score : Infinity;
+  const stages = [
+    { stride: 2, dminF: 0.2, dmaxF: 5, sigma: 1.0 },
+    { stride: 1, dminF: 0.3, dmaxF: 3.2, sigma: 0.6, band: 3 },
+    { stride: 1, dminF: 0.35, dmaxF: 2.8, sigma: 0.5, band: 1.5 },
+  ];
+  const fin = run(shift, stages);
+  if (!fin) return null;
+  const { res } = fin;
+  const stride = res.stride;
+  const boundaryFrame = new Float64Array(N + 1);
+  boundaryFrame[0] = res.start0 * stride;
+  for (let j = 0; j < N; j++) boundaryFrame[j + 1] = res.ends[j] * stride;
+  const bt = Array.from(boundaryFrame, (f) => Math.max(0, (f - 0.5) / fps));
+  const startSec = bt.slice(0, N);
+  const endSec = bt.slice(1);
+  // confidence per event
+  const cumCos = cumulative(fin.em.cos, fin.em.D, T);
+  const Tp = T + 1;
+  const confidence = new Float64Array(N);
+  for (let j = 0; j < N; j++) {
+    const c = chordSet.chordOf[j];
+    const a = boundaryFrame[j];
+    const b = boundaryFrame[j + 1];
+    if (c < 0 || b - a < 1) { confidence[j] = 0.3; continue; }
+    const mean = (cc) => (cumCos[cc * Tp + b] - cumCos[cc * Tp + a]) / (b - a);
+    const own = mean(c);
+    let other = -Infinity;
+    for (let cc = 0; cc < fin.em.D; cc++) if (cc !== c) other = Math.max(other, mean(cc));
+    let conf = Number.isFinite(other) ? Math.max(0, Math.min(1, (own - other) / 0.2 + 0.5)) : 0.5;
+    const same = (k) => k >= 0 && k < N && chordSet.chordOf[k] === c;
+    if (same(j - 1) || same(j + 1)) conf *= 0.6;
+    confidence[j] = conf;
+  }
+  return { startSec, endSec, confidence, shift, shiftMargin, score: res.score, scales: fin.scales, chordSet, features: null };
+}
+
+// Moves every boundary to the strongest onset within +-win seconds (if strong enough). The
+// onset envelope peaks a little before the attack in the STFT frame: `lead` seconds are added.
+// `startSec` has one entry per event; entry 0 is refined too. Returns a new array.
+export function snapToOnsets(startSec, onset, onsetFps, { win = 0.14, minStrength = 1.8, lead = 0 } = {}) {
+  const out = Array.from(startSec);
+  for (let j = 0; j < out.length; j++) {
+    const prevT = j ? out[j - 1] : -Infinity;
+    const nextT = j + 1 < startSec.length ? startSec[j + 1] : Infinity;
+    const w = Math.min(win, 0.4 * (startSec[j] - (j ? startSec[j - 1] : startSec[j] - 1)), win);
+    const i0 = Math.max(1, Math.floor((startSec[j] - win) * onsetFps));
+    const i1 = Math.min(onset.length - 2, Math.ceil((startSec[j] + win) * onsetFps));
+    let best = -1;
+    let bv = 0;
+    for (let i = i0; i <= i1; i++) {
+      if (onset[i] < onset[i - 1] || onset[i] <= onset[i + 1]) continue;
+      const dt = Math.abs(i / onsetFps - startSec[j]);
+      const v = onset[i] * (1 - 0.5 * (dt / win));
+      if (v > bv) { bv = v; best = i; }
+    }
+    if (best >= 0 && onset[best] >= minStrength && w >= 0) {
+      const t = best / onsetFps + lead;
+      if (t > prevT + 0.15 && t < nextT - 0.15) out[j] = t;
+    }
+  }
+  return out;
+}
+
+// Moves the boundaries lying within `tol` beats of a tracked beat onto it.
+export function snapToBeats(times, beatTimes, bpm, tol = 0.2) {
+  const p = 60 / bpm;
+  return times.map((t) => {
+    let best = null;
+    let bd = Infinity;
+    for (const b of beatTimes) {
+      const d = Math.abs(b - t);
+      if (d < bd) { bd = d; best = b; }
+      else if (b > t) break;
+    }
+    return best !== null && bd <= tol * p ? best : t;
+  });
+}
