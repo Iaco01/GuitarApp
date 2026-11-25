@@ -56,26 +56,70 @@ export function fftInPlace(re, im) {
   }
 }
 
-// Magnitude spectra (bins 0..n/2) of two real frames at once, with one complex FFT.
-// `a` and `b` have length n; the results go in magA and magB (length >= n/2 + 1). The scratch
-// buffers re/im (length n) are optional.
-export function fftRealPairMagnitudes(a, b, magA, magB, re, im) {
+// In-place forward complex FFT of (re, im) whose input is already in bit-reversed order (the callers copy
+// their frames straight to the reversed positions, which saves the swap pass). The first two stages are one
+// multiplication-free radix-4 pass. Same result as fftInPlace up to rounding.
+function fftBitReversed(re, im) {
+  const n = re.length;
+  const { cos, sin } = fftPlan(n);
+  for (let i = 0; i < n; i += 4) {
+    const x0r = re[i], x1r = re[i + 1], x2r = re[i + 2], x3r = re[i + 3];
+    const x0i = im[i], x1i = im[i + 1], x2i = im[i + 2], x3i = im[i + 3];
+    const s0r = x0r + x1r, s0i = x0i + x1i, d0r = x0r - x1r, d0i = x0i - x1i;
+    const s1r = x2r + x3r, s1i = x2i + x3i, d1r = x2r - x3r, d1i = x2i - x3i;
+    re[i] = s0r + s1r; im[i] = s0i + s1i;
+    re[i + 2] = s0r - s1r; im[i + 2] = s0i - s1i;
+    re[i + 1] = d0r + d1i; im[i + 1] = d0i - d1r;
+    re[i + 3] = d0r - d1i; im[i + 3] = d0i + d1r;
+  }
+  for (let size = 8; size <= n; size <<= 1) {
+    const half = size >> 1;
+    const step = n / size;
+    for (let start = 0; start < n; start += size) {
+      for (let k = 0, w = 0; k < half; k++, w += step) {
+        const wr = cos[w];
+        const wi = sin[w];
+        const a = start + k;
+        const b = a + half;
+        const tr = re[b] * wr - im[b] * wi;
+        const ti = re[b] * wi + im[b] * wr;
+        re[b] = re[a] - tr;
+        im[b] = im[a] - ti;
+        re[a] += tr;
+        im[a] += ti;
+      }
+    }
+  }
+}
+
+// Magnitude spectra (bins 0..kMax, default n/2) of two real frames at once, with one complex FFT.
+// `a` and `b` have length n; the results go in magA and magB (length >= kMax + 1; the bins above kMax are
+// not computed). The scratch buffers re/im (length n) are optional.
+export function fftRealPairMagnitudes(a, b, magA, magB, re, im, kMax = a.length >> 1) {
   const n = a.length;
   const r = re || new Float64Array(n);
   const m = im || new Float64Array(n);
-  for (let i = 0; i < n; i++) {
-    r[i] = a[i];
-    m[i] = b[i];
+  if (n < 8) {
+    for (let i = 0; i < n; i++) { r[i] = a[i]; m[i] = b[i]; }
+    fftInPlace(r, m);
+  } else {
+    const { rev } = fftPlan(n);
+    for (let i = 0; i < n; i++) {
+      const j = rev[i];
+      r[j] = a[i];
+      m[j] = b[i];
+    }
+    fftBitReversed(r, m);
   }
-  fftInPlace(r, m);
-  for (let k = 0; k <= n / 2; k++) {
-    const k2 = (n - k) & (n - 1);
+  const mask = n - 1;
+  for (let k = 0; k <= kMax; k++) {
+    const k2 = (n - k) & mask;
     const sr = r[k] + r[k2];
     const si = m[k] - m[k2];
     const dr = r[k] - r[k2];
     const di = m[k] + m[k2];
-    magA[k] = 0.5 * Math.hypot(sr, si);
-    magB[k] = 0.5 * Math.hypot(dr, di);
+    magA[k] = 0.5 * Math.sqrt(sr * sr + si * si);
+    magB[k] = 0.5 * Math.sqrt(dr * dr + di * di);
   }
 }
 

@@ -39,7 +39,7 @@ function hann(n) {
 
 // Calls fn(t, magSpectrumOfFrame) for every frame t of the STFT (frame t centred on t*hop), two
 // frames per FFT. The spectrum buffer is reused between calls. A generator: it yields every 32 FFTs.
-function* forEachFrame(x, win, hop, nFrames, fn) {
+function* forEachFrame(x, win, hop, nFrames, fn, kMax = win >> 1) {
   const w = hann(win);
   const a = new Float64Array(win);
   const b = new Float64Array(win);
@@ -49,6 +49,10 @@ function* forEachFrame(x, win, hop, nFrames, fn) {
   const im = new Float64Array(win);
   const fill = (buf, t) => {
     const start = t * hop - win / 2;
+    if (start >= 0 && start + win <= x.length) {
+      for (let i = 0; i < win; i++) buf[i] = x[start + i] * w[i];
+      return;
+    }
     for (let i = 0; i < win; i++) {
       const p = start + i;
       buf[i] = p >= 0 && p < x.length ? x[p] * w[i] : 0;
@@ -58,7 +62,7 @@ function* forEachFrame(x, win, hop, nFrames, fn) {
     fill(a, t);
     if (t + 1 < nFrames) fill(b, t + 1);
     else b.fill(0);
-    fftRealPairMagnitudes(a, b, magA, magB, re, im);
+    fftRealPairMagnitudes(a, b, magA, magB, re, im, kMax);
     fn(t, magA);
     if (t + 1 < nFrames) fn(t + 1, magB);
     if ((t & 63) === 62) yield;
@@ -113,7 +117,7 @@ export function estimateTuningCents(x, sampleRate = FEATURE_RATE) {
       a[i] = p1 >= 0 && p1 < x.length ? x[p1] * w[i] : 0;
       b[i] = p2 >= 0 && p2 < x.length ? x[p2] * w[i] : 0;
     }
-    fftRealPairMagnitudes(a, b, magA, magB, re, im);
+    fftRealPairMagnitudes(a, b, magA, magB, re, im, Math.min(CHROMA_WIN / 2, Math.ceil(1500 / df) + 2));
     for (const mag of [magA, magB]) {
       spectralPeaks(mag, df, 100, 1500, 0.1, peaks);
       for (const p of peaks) {
@@ -176,7 +180,7 @@ export function* computeFeaturesSteps(x, { chromaHop = 1024, onProgress = null }
       bass[base + (((r % 12) + 12) % 12)] += p.m * (1 - 1.2 * dev);
     }
     if ((t & 255) === 0) progress(0.5 * (t / frames));
-  });
+  }, Math.min(CHROMA_WIN / 2, Math.ceil(2000 / df) + 2));
 
   // log compression relative to a global reference (95th percentile of frame energy)
   const energies = new Float32Array(frames);
@@ -213,7 +217,7 @@ export function* computeFeaturesSteps(x, { chromaHop = 1024, onProgress = null }
     }
     flux[t] = f;
     if ((t & 1023) === 0) progress(0.5 + 0.5 * (t / oFrames));
-  });
+  }, kMax + 1);
   const onset = detrendOnset(flux, Math.round((0.5 * sr) / ONSET_HOP));
   progress(1);
   return { fps: sr / chromaHop, frames, chroma, bass, onset, onsetFps: sr / ONSET_HOP, tuningCents, duration: x.length / sr };
