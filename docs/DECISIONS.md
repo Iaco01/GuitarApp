@@ -100,4 +100,4 @@ Registro delle scelte che la spec non fissa. Formato: data, decisione, motivo. C
 - Il registratore a tap non suona l'audio: con un brano che ha l'audio si registra "a vuoto" (le durate si correggono con −/+).
 - Il clic sopra l'audio non compensa la latenza dell'uscita (vale solo se audio e clic escono insieme).
 - "Fine brano" serve solo al suggerimento BPM: dopo l'ultima ancora la timeline usa i BPM salvati.
-- Con un'etichetta lunga all'estremo destro di una riga, vicino a una parola di una lettera, l'etichetta può sporgere nel margine della sezione (non crea scroll).
+- Con un'etichetta lunga all'estremo destro di una riga, sopra una parola corta, l'etichetta sporge oltre il testo; a 360 px e scala 2,0 quattro etichette "Em" sporgono di circa 5 px oltre il bordo dello schermo e vengono tagliate (nessuno scroll orizzontale, `overflow-x: clip`). Nessun caso a scala 1,0 né su iPhone SE/13.

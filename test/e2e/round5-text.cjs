@@ -1,8 +1,8 @@
 // Round 5 point 8: spacing of the text under the chords, on the real file (not versioned).
-// Run: npm run build && node test/e2e/round5-text.cjs [path/to/index.html]
+// Run: npm run build && node test/e2e/round5-text.cjs [path/to/index.html] [tag] [360|SE|13]
 // Counts lines whose rendered text has gaps wider than the original spaces, label overlaps, horizontal scroll.
 // Only counts and positions are printed, never the lyrics.
-const { chromium } = require('playwright');
+const { chromium, devices } = require('playwright');
 const path = require('path');
 const fs = require('fs');
 const ROOT = path.resolve(__dirname, '..', '..');
@@ -11,6 +11,8 @@ const REAL = path.join(ROOT, 'test', 'fixtures', 'local', 'american-pie.mht');
 const OUT = path.join(ROOT, 'test-artifacts', 'round-5');
 fs.mkdirSync(OUT, { recursive: true });
 const tag = process.argv[3] || 'after';
+const DEV = process.argv[4] || '360';
+const PROFILE = DEV === 'SE' ? devices['iPhone SE (3rd gen)'] : DEV === '13' ? devices['iPhone 13'] : { viewport: { width: 360, height: 780 }, deviceScaleFactor: 2, hasTouch: true };
 let fails = 0;
 const rec = (id, ok, info) => { if (!ok) fails++; console.log(`${ok ? 'PASS' : 'FAIL'} ${id} ${info || ''}`); };
 
@@ -56,7 +58,7 @@ function probe() {
 (async () => {
   const browser = await chromium.launch();
   for (const scale of [1.0, 2.0]) {
-    const ctx = await browser.newContext({ viewport: { width: 360, height: 780 }, deviceScaleFactor: 2, hasTouch: true });
+    const ctx = await browser.newContext(PROFILE);
     const page = await ctx.newPage();
     await page.goto('file://' + DIST);
     await page.setInputFiles('#import-input', REAL);
@@ -70,7 +72,7 @@ function probe() {
     rec(`${tag}@${scale} no horizontal scroll`, r.sw <= r.iw && r.bw <= r.iw, `sw ${r.sw} iw ${r.iw}`);
     console.log(`INFO ${tag}@${scale} lines with a gap wider than the original spaces: ${r.withExtra} of ${r.checkedLines}; labels past the right edge: ${r.beyond}`);
     await page.evaluate(() => document.querySelector('.sec').scrollIntoView());
-    await page.screenshot({ path: path.join(OUT, `text-${tag}-${scale}.png`) });
+    await page.screenshot({ path: path.join(OUT, `text-${tag}-${DEV}-${scale}.png`) });
     await ctx.close();
   }
   await browser.close();
