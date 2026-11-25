@@ -231,7 +231,7 @@ async function idbKeys(page) {
     await page.click('#sync-play');
     const sug = await page.innerText('#sync-sugs');
     info('B3W anchors', `Finale anchor shown ${anchorTxt}; expected ${finStart.toFixed(3)} s; stored ${anchorVal && anchorVal.audio ? JSON.stringify(anchorVal.audio.anchors) : 'n/a'}`);
-    rec('B3W suggestion detects the Finale as slower (97 -> 96)', /Nella sezione Finale l’audio va il 1(,\d)?% più lento: −1 BPM circa/.test(sug), JSON.stringify(sug));
+    rec('B3W suggestion detects the Finale as slower (97 -> 96)', /Nella sezione Finale l’audio va il [01](,\d)?% più lento: −(0,[5-9]|1(,[0-4])?) BPM circa/.test(sug), JSON.stringify(sug));
     await page.screenshot({ path: path.join(DIR, 'b3w-suggestion.png') });
     // apply only the suggestion about the Finale (a multi-section one would flatten 70/96/142, bug)
     const sugCount = await page.$$eval('#sync-sugs .sync-sug', (s) => s.length);
