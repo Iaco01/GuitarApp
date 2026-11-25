@@ -334,7 +334,7 @@ export function openSyncScreen({ song, persist, onClose, blob = null }) {
     domEl('button', { type: 'button', class: 'btn', id: 'sync-listen', onclick: () => listenFrom(listenFromSec(song.audio.offsetSec), true) }, 'Ascolta dall’inizio (con il clic)'));
   const moreBtn = domEl('button', {
     type: 'button', class: 'btn', id: 'sync-more-btn', 'aria-label': 'Altri comandi', 'aria-expanded': 'false', 'aria-controls': 'sync-more',
-    onclick: () => { moreBox.hidden = !moreBox.hidden; moreBtn.setAttribute('aria-expanded', String(!moreBox.hidden)); overlay.style.setProperty('--sync-bar-h', bar.offsetHeight + 'px'); },
+    onclick: () => { moreBox.hidden = !moreBox.hidden; moreBtn.setAttribute('aria-expanded', String(!moreBox.hidden)); paintFoot(); },
   }, '⋯');
   const bigRow = domEl('div', { class: 'sync-big-row' }, firstBtn, nextBtn);
   const bar = domEl('div', { class: 'sync-transport', id: 'sync-transport', hidden: true },
@@ -350,7 +350,7 @@ export function openSyncScreen({ song, persist, onClose, blob = null }) {
   function paintBar() {
     bar.hidden = !(song.audio && currentBlob);
     bigRow.hidden = isAligned(); // "Primo accordo!" and the section anchors are the manual way
-    overlay.style.setProperty('--sync-bar-h', bar.hidden ? '0px' : bar.offsetHeight + 'px');
+    paintFoot();
     const n = song.sections.length;
     if (nextIdx >= n) {
       nextBtn.disabled = true;
@@ -361,6 +361,14 @@ export function openSyncScreen({ song, persist, onClose, blob = null }) {
       nextBtn.setAttribute('aria-label', `Inizio sezione: ${sectionName(nextIdx)}`);
     }
   }
+
+  // Fixed bar at the bottom: the notice (above the buttons, so it never covers the rows), the transport and "Fatto"
+  const foot = domEl('div', { class: 'sync-foot', id: 'sync-foot' },
+    msg,
+    bar,
+    domEl('div', { class: 'sync-done' }, domEl('button', { type: 'button', class: 'btn primary', id: 'sync-close', onclick: () => close() }, 'Fatto')));
+  const paintFoot = () => overlay.style.setProperty('--sync-bar-h', foot.offsetHeight + 'px');
+  if (typeof ResizeObserver !== 'undefined') new ResizeObserver(paintFoot).observe(foot);
 
   const close = () => {
     if (msgTimer) clearTimeout(msgTimer);
@@ -377,11 +385,9 @@ export function openSyncScreen({ song, persist, onClose, blob = null }) {
 
   const overlay = domEl('div', { class: 'rec sync', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Sincronizza audio' },
     domEl('div', { class: 'sync-head' },
-      domEl('div', { class: 'rec-title' }, 'Sincronizza audio'),
-      domEl('button', { type: 'button', class: 'btn primary', id: 'sync-close', onclick: close }, 'Fatto')),
+      domEl('div', { class: 'rec-title' }, 'Sincronizza audio')),
     dyn,
-    msg,
-    bar,
+    foot,
     fileInput);
 
   function start() {

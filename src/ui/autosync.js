@@ -5,7 +5,7 @@
 import { domEl, domClear } from './dom.js';
 import { runAutoSync, AUTOSYNC_CANCELLED } from './audiodecode.js';
 import { openCorrection } from './correct.js';
-import { eventRefs, sectionState, sectionEventIndices, alignmentFits, countVerified, shiftAlignment, applyMeasuredTiming, exportTruth } from '../alignment.js';
+import { eventRefs, sectionState, sectionEventIndices, alignmentFits, alignmentRecognised, countVerified, shiftAlignment, applyMeasuredTiming, exportTruth } from '../alignment.js';
 import { formatClock } from '../audiosync.js';
 import { formatBpm } from '../render.js';
 
@@ -17,6 +17,7 @@ const AS_STATE_TEXT = {
 };
 const AS_SHIFT_MS = [-100, -50, 50, 100];
 const AS_LEAD_SEC = 2;
+const AS_GAP_MIN_SEC = 3;
 
 export function describeSemitones(n) {
   const a = Math.abs(n);
@@ -45,7 +46,7 @@ export function createAutoSyncPanel({ song, getBlob, getPlayer, timelineWith, pe
   let progressLabel = '';
   let stats = null;
   let nowText = '';
-  let lastEv = -2;
+  let lastEv = '';
   let progBar = null;
   let progText = null;
   const secName = (i) => song.sections[i].name || `Sezione ${i + 1}`;
@@ -71,6 +72,15 @@ export function createAutoSyncPanel({ song, getBlob, getPlayer, timelineWith, pe
         shouldCancel: () => cancel,
         onProgress: (f, label) => { progress = f; progressLabel = label; paintProgress(); },
       });
+      if (!alignmentRecognised(r.alignment, song)) {
+        // almost every section is red: wrong file, noise or silence. Nothing is kept.
+        running = false;
+        window.__gappAutosync = { ...r.stats, events: r.alignment.eventStartSec.length, notRecognised: true };
+        setMsg('Audio non riconosciuto: è il brano giusto? Controlla il file audio, oppure usa la sincronizzazione manuale qui sotto.', true);
+        refresh();
+        if (onChange) onChange();
+        return;
+      }
       song.audio.alignment = r.alignment;
       const first = r.alignment.eventStartSec[0];
       song.audio.offsetSec = Math.max(0, first);
@@ -118,8 +128,18 @@ export function createAutoSyncPanel({ song, getBlob, getPlayer, timelineWith, pe
     const refs = eventRefs(song);
     const counts = { green: 0, yellow: 0, red: 0, verified: 0 };
     const rows = domEl('ul', { class: 'as-rows', id: 'as-rows' });
+    // stretches of music that is not in the sheet (a repeat, a solo...), shown before the section that follows
+    const gapsBefore = new Map();
+    for (const g of a.gaps || []) {
+      if (g.endSec - g.startSec < AS_GAP_MIN_SEC) continue;
+      const r = refs[g.before];
+      if (r) gapsBefore.set(r.section, (gapsBefore.get(r.section) || []).concat([g]));
+    }
     song.sections.forEach((_, si) => {
       if (!idx[si].length) return;
+      for (const g of gapsBefore.get(si) || []) {
+        rows.append(domEl('li', { class: 'as-gap', 'data-gap': g.before }, `${formatClock(g.startSec).replace(/,\d$/, '')}–${formatClock(g.endSec).replace(/,\d$/, '')}: parte non presente nel foglio`));
+      }
       const st = sectionState(a, si);
       counts[st]++;
       const s = a.sections[si];
@@ -129,12 +149,11 @@ export function createAutoSyncPanel({ song, getBlob, getPlayer, timelineWith, pe
         domEl('div', { class: 'as-info' },
           domEl('div', { class: 'as-top' }, domEl('span', { class: 'as-name' }, secName(si)), domEl('span', { class: 'as-time' }, formatClock(tsec ? tsec.startSec : 0))),
           domEl('div', { class: 'as-sub' }, `${AS_STATE_TEXT[st]} · ${s.bpm === null ? 'tempo libero' : formatBpm(s.bpm) + ' BPM'} · ${idx[si].length} accordi`)),
-        domEl('div', { class: 'as-btns' },
-          domEl('button', { type: 'button', class: 'btn small', 'data-act': 'listen', onclick: () => listenFrom((tsec ? tsec.startSec : 0) - 1) }, 'Ascolta'),
-          domEl('button', {
-            type: 'button', class: 'btn small' + (st === 'yellow' || st === 'red' ? ' primary' : ''), 'data-act': 'correct', 'aria-label': `Correggi a orecchio ${secName(si)}`,
-            onclick: () => correct(si),
-          }, 'Correggi a orecchio'))));
+        domEl('button', { type: 'button', class: 'btn icon as-act', 'data-act': 'listen', 'aria-label': `Ascolta ${secName(si)}`, title: 'Ascolta', onclick: () => listenFrom((tsec ? tsec.startSec : 0) - 1) }, '▶'),
+        domEl('button', {
+          type: 'button', class: 'btn icon as-act' + (st === 'yellow' || st === 'red' ? ' primary' : ''), 'data-act': 'correct', 'aria-label': `Correggi a orecchio ${secName(si)}`, title: 'Correggi a orecchio',
+          onclick: () => correct(si),
+        }, '✎')));
     });
     return { rows, counts, refs };
   }
@@ -148,7 +167,12 @@ export function createAutoSyncPanel({ song, getBlob, getPlayer, timelineWith, pe
       timelineWith,
       addFrameListener,
       persist,
-      onSaved: () => { rebuild(); setMsg(`«${secName(si)}» verificata a orecchio.`); refresh(); if (onChange) onChange(); },
+      onSaved: (info) => {
+        rebuild();
+        setMsg(info && info.missing.length ? `«${secName(si)}»: salvati i tempi toccati; senza tempo (restano quelli automatici): ${info.missing.join(', ')}.` : `«${secName(si)}» verificata a orecchio.`);
+        refresh();
+        if (onChange) onChange();
+      },
     });
   }
 
@@ -238,15 +262,16 @@ export function createAutoSyncPanel({ song, getBlob, getPlayer, timelineWith, pe
         domEl('button', { type: 'button', class: 'btn', id: 'as-redo', onclick: start }, 'Rifai'),
         domEl('button', { type: 'button', class: 'btn danger', id: 'as-discard', onclick: discard }, 'Scarta')));
     const refs = sum.refs;
-    lastEv = -2;
+    lastEv = '';
     nowRefs = refs;
   }
   let nowRefs = null;
 
   // called by the sync screen at every frame of the player
   function onFrame(info) {
-    if (running || !nowRefs || info.eventIndex === lastEv) return;
-    lastEv = info.eventIndex;
+    const evKey = info.eventIndex + '|' + (info.state === 'playing');
+    if (running || !nowRefs || evKey === lastEv) return;
+    lastEv = evKey;
     const r = nowRefs[info.eventIndex];
     nowText = r && info.state === 'playing' ? `${secName(r.section)} · ${r.rest ? 'pausa' : r.name}` : '';
     const nowEl = el.querySelector('#as-now');

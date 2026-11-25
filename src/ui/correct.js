@@ -31,6 +31,9 @@ export function openCorrection({ song, sectionIndex, name, getPlayer, timelineWi
   const player = () => getPlayer();
   const status = domEl('p', { class: 'corr-status', id: 'corr-status', role: 'status' }, '');
   const count = domEl('div', { class: 'corr-count', id: 'corr-count' }, '');
+  // what the next tap is for, always visible: the expected chord and how many taps are left
+  const nextBox = domEl('div', { class: 'corr-next', id: 'corr-next', 'aria-live': 'polite' });
+  const chordText = (k) => (refs[idx[k]].rest ? 'pausa' : refs[idx[k]].name);
   const chips = domEl('ol', { class: 'corr-chips', id: 'corr-chips' });
   const chipEls = idx.map((j, k) => {
     const li = domEl('li', { class: 'corr-chip', 'data-k': k, style: { '--cc': refs[j].rest ? 'var(--muted)' : chordColorVar(song, refs[j].name) } }, refs[j].rest ? '—' : refs[j].name);
@@ -40,7 +43,7 @@ export function openCorrection({ song, sectionIndex, name, getPlayer, timelineWi
   const tapBtn = domEl('button', { type: 'button', class: 'btn primary corr-tap', id: 'corr-tap', 'aria-label': 'Cambio d’accordo adesso' }, 'Cambio!');
   const previewBtn = domEl('button', { type: 'button', class: 'btn', id: 'corr-preview', onclick: () => preview() }, 'Anteprima: ascolta');
   const saveBtn = domEl('button', { type: 'button', class: 'btn primary', id: 'corr-save', onclick: () => save() }, 'Salva');
-  const undoBtn = domEl('button', { type: 'button', class: 'btn', id: 'corr-undo-tap', onclick: () => { taps.pop(); paint(); } }, 'Togli ultimo tocco');
+  const undoBtn = domEl('button', { type: 'button', class: 'btn', id: 'corr-undo-tap', onclick: () => { taps.pop(); paint(); } }, 'Annulla ultimo tocco');
   const restartBtn = domEl('button', { type: 'button', class: 'btn', id: 'corr-restart', onclick: () => restart() }, 'Ricomincia');
   const reactionLbl = domEl('span', { class: 'corr-react-val', id: 'corr-react-val' }, '');
   const stepReaction = (d) => {
@@ -83,12 +86,13 @@ export function openCorrection({ song, sectionIndex, name, getPlayer, timelineWi
       return;
     }
     if (taps.length >= N) {
-      setStatus(`Hai già toccato ${N} volte: premi «Anteprima» o «Togli ultimo tocco».`, true);
+      setStatus(`Hai già toccato ${N} volte: premi «Anteprima» o «Annulla ultimo tocco».`, true);
       return;
     }
     taps.push(p.currentTime());
     if (navigator.vibrate) { try { navigator.vibrate(8); } catch { /* ignore */ } }
     if (taps.length === N) setStatus('Fatto: ascolta l’anteprima e poi salva.');
+    else if (taps.length === 1) setStatus(`Tocca «Cambio!» a ogni cambio d’accordo (sono ${N}, il primo compreso).`);
     paint();
   }
   tapBtn.addEventListener('pointerdown', (e) => {
@@ -106,11 +110,11 @@ export function openCorrection({ song, sectionIndex, name, getPlayer, timelineWi
     const p = player();
     if (!p) return;
     const r = result();
-    if (!r.ok) {
-      setStatus(`Servono ${N} tocchi, ne hai ${r.count}.`, true);
+    if (r.count === 0) {
+      setStatus('Fai almeno un tocco.', true);
       return;
     }
-    const pr = previewReplace(alignment, song, sectionIndex, r.starts);
+    const pr = previewReplace(alignment, song, sectionIndex, r.starts, { partial: true });
     if (!pr.ok) {
       setStatus(pr.reason, true);
       return;
@@ -118,23 +122,25 @@ export function openCorrection({ song, sectionIndex, name, getPlayer, timelineWi
     previewing = true;
     p.setTimeline(timelineWith(pr.alignment));
     p.playFromTime(Math.max(0, r.starts[0] - 1.5));
-    setStatus('Anteprima: l’accordo evidenziato deve cambiare insieme a quello che senti.');
+    setStatus(pr.missing.length
+      ? `Anteprima: mancano ${pr.missing.length} tocchi. Senza tempo (tengono quello automatico): ${pr.missing.map(chordText).join(', ')}.`
+      : 'Anteprima: l’accordo evidenziato deve cambiare insieme a quello che senti.');
     paint();
   }
 
   function save() {
     const r = result();
-    if (!r.ok) {
-      setStatus(`Servono ${N} tocchi, ne hai ${r.count}.`, true);
+    if (r.count === 0) {
+      setStatus('Fai almeno un tocco.', true);
       return;
     }
-    const res = replaceSectionStarts(alignment, song, sectionIndex, r.starts);
+    const res = replaceSectionStarts(alignment, song, sectionIndex, r.starts, { partial: true });
     if (!res.ok) {
       setStatus(res.reason, true);
       return;
     }
     persist();
-    close(true);
+    close(true, { missing: res.missing.map(chordText) });
   }
 
   function paint() {
@@ -144,9 +150,12 @@ export function openCorrection({ song, sectionIndex, name, getPlayer, timelineWi
       c.classList.toggle('next', !previewing && k === taps.length);
     });
     reactionLbl.textContent = `${reactionMs} ms`;
-    const full = taps.length === N;
-    previewBtn.disabled = !full;
-    saveBtn.disabled = !full;
+    const left = N - taps.length;
+    nextBox.textContent = previewing ? 'Anteprima in corso' : left > 0 ? `Prossimo: ${chordText(taps.length)} · ${left === 1 ? 'manca 1 tocco' : `mancano ${left} tocchi`}` : 'Tocchi completi: ascolta l’anteprima e salva';
+    nextBox.dataset.left = String(left);
+    previewBtn.disabled = taps.length === 0;
+    saveBtn.disabled = taps.length === 0;
+    saveBtn.textContent = left > 0 && taps.length > 0 ? `Salva (${left} senza tempo)` : 'Salva';
     undoBtn.disabled = taps.length === 0;
   }
 
@@ -159,7 +168,7 @@ export function openCorrection({ song, sectionIndex, name, getPlayer, timelineWi
     if (chipEls[cur] && chipEls[cur].scrollIntoView) chipEls[cur].scrollIntoView({ block: 'nearest' });
   });
 
-  function close(saved) {
+  function close(saved, info = null) {
     removeFrame();
     document.removeEventListener('keydown', onKey);
     const p = player();
@@ -168,7 +177,7 @@ export function openCorrection({ song, sectionIndex, name, getPlayer, timelineWi
       p.setTimeline(timelineWith(null));
     }
     overlay.remove();
-    if (saved && onSaved) onSaved();
+    if (saved && onSaved) onSaved(info);
   }
   const onKey = (e) => { if (e.key === 'Escape') close(false); };
 
@@ -178,6 +187,7 @@ export function openCorrection({ song, sectionIndex, name, getPlayer, timelineWi
       domEl('button', { type: 'button', class: 'btn', id: 'corr-close', onclick: () => close(false) }, 'Annulla')),
     domEl('p', { class: 'muted small' }, `L’audio parte ${CORRECT_LEAD_SEC} secondi prima della sezione (da ${formatClock(Math.max(0, sectionStart() - CORRECT_LEAD_SEC))}). Tocca «Cambio!» appena senti cambiare l’accordo.`),
     count,
+    nextBox,
     chips,
     status,
     tapBtn,
