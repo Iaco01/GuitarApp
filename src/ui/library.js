@@ -5,7 +5,7 @@ import { listLibrary, deleteSong, getSettings, saveSettings, storageUsedBytes, g
 import { filterLibrary, sortLibrary, SORT_MODES, buildExport, exportFileName, parseExport, planImport, applyImport } from '../libio.js';
 import { choiceDialog } from './dialog.js';
 import { openCalibration } from './calibrate.js';
-import { audioStoreDelete, audioStoreTotals, audioStoreQuota } from '../audiostore.js';
+import { audioStoreDelete, audioStoreHas, audioStoreTotals, audioStoreQuota } from '../audiostore.js';
 
 const MONTHS_IT = ['gen', 'feb', 'mar', 'apr', 'mag', 'giu', 'lug', 'ago', 'set', 'ott', 'nov', 'dic'];
 
@@ -107,6 +107,23 @@ export function showLibraryScreen(root, { onImportFile, message }) {
   const tools = domEl('div', { class: 'lib-tools' }, search, sort);
 
   const listHolder = domEl('div', { class: 'list-holder' });
+  // does the audio file really exist in IndexedDB? Checked after the list is on screen.
+  const audioPresent = new Map();
+  const paintAudioBadge = (badge, present) => {
+    badge.textContent = present === undefined ? 'audio' : present ? 'audio ✓' : 'audio mancante';
+    badge.classList.toggle('missing', present === false);
+  };
+  async function checkAudioBadges() {
+    for (const badge of listHolder.querySelectorAll('.badge[data-badge="audio"]')) {
+      const id = badge.closest('li').getAttribute('data-id');
+      if (!audioPresent.has(id)) {
+        let ok = false;
+        try { ok = await audioStoreHas(id); } catch (err) { ok = false; }
+        audioPresent.set(id, ok);
+      }
+      if (badge.isConnected) paintAudioBadge(badge, audioPresent.get(id));
+    }
+  }
   function renderList() {
     domClear(listHolder);
     const shown = sortLibrary(filterLibrary(entries, query), sortMode);
@@ -122,7 +139,7 @@ export function showLibraryScreen(root, { onImportFile, message }) {
         domEl('a', { class: 'song-row', href: '#/song/' + encodeURIComponent(s.id) },
           domEl('span', { class: 'song-title' }, s.title || 'Senza titolo'),
           domEl('span', { class: 'song-meta' }, meta),
-          edited || s.hasAudio ? domEl('span', { class: 'song-badges' }, edited ? domEl('span', { class: 'badge', 'data-badge': 'durate' }, `durate ✓${s.bars ? ' · ' + s.bars + ' battute' : ''}`) : null, s.hasAudio ? domEl('span', { class: 'badge', 'data-badge': 'audio' }, 'audio ✓') : null) : null),
+          edited || s.hasAudio ? domEl('span', { class: 'song-badges' }, edited ? domEl('span', { class: 'badge', 'data-badge': 'durate' }, `durate ✓${s.bars ? ' · ' + s.bars + ' battute' : ''}`) : null, s.hasAudio ? domEl('span', { class: 'badge', 'data-badge': 'audio' }, audioPresent.has(s.id) ? (audioPresent.get(s.id) ? 'audio ✓' : 'audio mancante') : 'audio') : null) : null),
         domEl('button', {
           type: 'button',
           class: 'btn icon danger',
@@ -141,6 +158,8 @@ export function showLibraryScreen(root, { onImportFile, message }) {
         }, '✕')));
     }
     listHolder.append(list);
+    for (const b of list.querySelectorAll('.badge[data-badge="audio"]')) if (audioPresent.get(b.closest('li').getAttribute('data-id')) === false) b.classList.add('missing');
+    checkAudioBadges();
   }
 
   // ---- backup ----

@@ -8,12 +8,12 @@ import { effectiveSectionBpms } from '../model.js';
 import { audioStoreGet } from '../audiostore.js';
 import { getDevice } from '../storage.js';
 import { formatBpm } from '../render.js';
-import { audioAnchors, formatClock, setAnchor, removeAnchor, suggestSectionBpms, applyBpmSuggestion, listenFromSec } from '../audiosync.js';
+import { audioAnchors, formatClock, setAnchor, removeAnchor, suggestSectionBpms, applyBpmSuggestion, listenFromSec, firstChordOffsetSec } from '../audiosync.js';
+import { openAnchorSheet } from './anchorsheet.js';
 import { attachAudioFile, removeAudioFile, AUDIO_ACCEPT } from './audiofile.js';
 import { openCalibration } from './calibrate.js';
 
 const SYNC_FINE_MS = [-50, -10, 10, 50];
-const SYNC_NUDGE_SEC = 0.1;
 const SYNC_BPM_STEP = 0.5;
 const SYNC_SKIP_SEC = 5;
 
@@ -37,7 +37,7 @@ export function openSyncScreen({ song, persist, onClose, blob = null }) {
     oninput: () => { if (player) player.seek(Number(scrub.value)); },
   });
   const playBtn = domEl('button', { type: 'button', class: 'btn primary', id: 'sync-play', onclick: () => togglePlay() }, 'Play');
-  const msg = domEl('p', { class: 'msg', id: 'sync-msg', role: 'status' }, '');
+  const msg = domEl('p', { class: 'msg sync-toast', id: 'sync-msg', role: 'status' }, '');
   const dyn = domEl('div', { class: 'sync-dyn', id: 'sync-dyn' });
   const fileInput = domEl('input', {
     type: 'file', id: 'sync-file', class: 'file-input', accept: AUDIO_ACCEPT,
@@ -61,10 +61,13 @@ export function openSyncScreen({ song, persist, onClose, blob = null }) {
     },
   });
 
+  let msgTimer = null;
   function setMsg(text, error = false) {
     message = text;
     msg.textContent = text;
-    msg.className = 'msg' + (error ? ' error' : '');
+    msg.className = 'msg sync-toast' + (error ? ' error' : '');
+    if (msgTimer) clearTimeout(msgTimer);
+    msgTimer = text ? setTimeout(() => { msg.classList.add('faded'); }, error ? 9000 : 5000) : null;
   }
 
   function makePlayer() {
@@ -125,6 +128,17 @@ export function openSyncScreen({ song, persist, onClose, blob = null }) {
     return true;
   }
 
+  // "Primo accordo!": the tap is the start of the first chord that is not a rest bar.
+  function tapFirstChord() {
+    const rel = firstChordOffsetSec(song);
+    const off = now() - rel;
+    if (off < 0) {
+      setMsg('Troppo presto: prima del primo accordo c’è una pausa più lunga. Riprova più tardi.', true);
+      return;
+    }
+    setAnchorAt(0, off);
+  }
+
   function listenFrom(sec, withClick) {
     if (!player) return;
     listening = !!withClick;
@@ -164,6 +178,7 @@ export function openSyncScreen({ song, persist, onClose, blob = null }) {
         domEl('label', { class: 'btn primary', for: 'sync-file', id: 'sync-pick' }, 'Carica audio'));
     }
     dyn.append(fileBox);
+    paintBar();
     if (!audio || !currentBlob) return;
 
     // latency
@@ -186,18 +201,15 @@ export function openSyncScreen({ song, persist, onClose, blob = null }) {
     }, `${d > 0 ? '+' : '−'}${Math.abs(d)}`)));
     dyn.append(domEl('section', { class: 'sync-box', id: 'sync-offset-box' },
       domEl('h3', null, '2. Inizio'),
-      domEl('p', { class: 'muted' }, 'Premi Play e, appena senti il primo accordo, tocca il pulsante grande.'),
-      domEl('button', { type: 'button', class: 'rec-tap sync-tap', id: 'sync-first', onclick: () => setAnchorAt(0, now()) }, 'Primo accordo!'),
+      domEl('p', { class: 'muted' }, 'Premi Play e, appena senti il primo accordo, tocca «Primo accordo!» nella barra in basso. Se il brano comincia con una pausa, conta dal primo accordo vero.'),
       domEl('p', { class: 'sync-offset', id: 'sync-offset' }, `Inizio: ${formatClock(audio.offsetSec)} (${Math.round(audio.offsetSec * 1000)} ms)`),
       fine,
-      domEl('button', { type: 'button', class: 'btn', id: 'sync-listen', onclick: () => listenFrom(listenFromSec(audio.offsetSec), true) }, 'Ascolta da qui (con il clic)')));
+      domEl('button', { type: 'button', class: 'btn', id: 'sync-listen-here', onclick: () => listenFrom(listenFromSec(audio.offsetSec), true) }, 'Ascolta da qui (con il clic)')));
 
     // 3. anchors
     const n = song.sections.length;
     if (nextIdx >= n) nextIdx = n;
-    const nextBtn = nextIdx < n
-      ? domEl('button', { type: 'button', class: 'btn primary sync-next', id: 'sync-next', onclick: () => { if (setAnchorAt(nextIdx, now())) { nextIdx = nextAfter(nextIdx); render(); } } }, `Inizio sezione: ${sectionName(nextIdx)}`)
-      : domEl('p', { class: 'muted small' }, 'Tutte le sezioni sono state fissate.');
+    paintBar();
     const bpms = effectiveSectionBpms(song);
     const rows = domEl('ul', { class: 'sync-rows', id: 'sync-rows' });
     song.sections.forEach((s, i) => {
@@ -206,10 +218,11 @@ export function openSyncScreen({ song, persist, onClose, blob = null }) {
       rows.append(domEl('li', { 'data-sec': i, class: has ? 'has' : '' },
         domEl('div', { class: 'sync-row-top' },
           domEl('span', { class: 'sync-row-name' }, i === 0 ? `${sectionName(i)} (inizio)` : sectionName(i)),
-          domEl('span', { class: 'sync-row-time' }, has ? `⚓ ${formatClock(t)}` : '—')),
+          has ? domEl('button', {
+            type: 'button', class: 'btn small sync-row-time sec-anchor', 'data-act': 'fine', 'aria-label': `Ancora di ${sectionName(i)}: ${formatClock(t)}. Tocca per regolare`,
+            onclick: () => openAnchorSheet({ song, index: i, name: sectionName(i), onChange: () => { rebuildTl(); render(); } }),
+          }, `⚓ ${formatClock(t)}`) : domEl('span', { class: 'sync-row-time' }, '—')),
         domEl('div', { class: 'row' },
-          has ? domEl('button', { type: 'button', class: 'btn small', 'data-act': 'minus', onclick: () => { setAnchorAt(i, t - SYNC_NUDGE_SEC); render(); } }, '−0,1 s') : null,
-          has ? domEl('button', { type: 'button', class: 'btn small', 'data-act': 'plus', onclick: () => { setAnchorAt(i, t + SYNC_NUDGE_SEC); render(); } }, '+0,1 s') : null,
           has ? domEl('button', { type: 'button', class: 'btn small', 'data-act': 'listen', onclick: () => listenFrom(t - 1, false) }, 'Ascolta') : null,
           i > 0 && has ? domEl('button', { type: 'button', class: 'btn small danger', 'data-act': 'remove', 'aria-label': `Togli l’ancora di ${sectionName(i)}`, onclick: () => { removeAnchor(audio, i); rebuildTl(); render(); } }, '✕ Togli') : null,
           i > 0 && !has ? domEl('button', { type: 'button', class: 'btn small', 'data-act': 'here', onclick: () => { if (setAnchorAt(i, now())) { nextIdx = Math.max(nextIdx, i + 1); render(); } } }, 'Fissa qui') : null),
@@ -221,7 +234,7 @@ export function openSyncScreen({ song, persist, onClose, blob = null }) {
     dyn.append(domEl('section', { class: 'sync-box', id: 'sync-anchors-box' },
       domEl('h3', null, '3. Sezioni (facoltativo)'),
       domEl('p', { class: 'muted' }, 'Se il brano cambia tempo o la registrazione “scivola”, segna l’inizio di ogni sezione mentre ascolti.'),
-      nextBtn,
+      nextIdx >= n ? domEl('p', { class: 'muted small' }, 'Tutte le sezioni sono state fissate.') : domEl('p', { class: 'muted small' }, 'Mentre ascolti, tocca «⚓ …» nella barra in basso all’inizio di ogni sezione.'),
       nextIdx < n ? domEl('button', { type: 'button', class: 'btn small', id: 'sync-skip', onclick: () => { nextIdx = nextAfter(nextIdx); render(); } }, 'Salta questa sezione') : null,
       rows,
       domEl('div', { class: 'row' },
@@ -248,15 +261,27 @@ export function openSyncScreen({ song, persist, onClose, blob = null }) {
     const list = domEl('div', { class: 'sync-sugs', id: 'sync-sugs' });
     if (!sugs.length) list.append(domEl('p', { class: 'muted small', id: 'sync-nosug' }, audio.endSec || Object.keys(audio.anchors).length ? 'I tempi delle sezioni coincidono con l’audio.' : 'Fissa almeno un’ancora (o la fine del brano) per avere un suggerimento sul BPM.'));
     for (const s of sugs) {
-      const names = s.from === s.to ? `La sezione ${sectionName(s.from)} sembra` : `Le sezioni ${sectionName(s.from)}–${sectionName(s.to)} sembrano`;
       list.append(domEl('div', { class: 'sync-sug' },
-        domEl('span', null, `${names} a ${formatBpm(s.suggested)} BPM (ora ${formatBpm(s.current)})`),
+        domEl('span', null, suggestionText(s)),
         domEl('button', {
           type: 'button', class: 'btn small primary', 'data-act': 'apply',
           onclick: () => { applyBpmSuggestion(song, s); rebuildTl(); render(); },
         }, 'Applica')));
     }
     dyn.append(domEl('section', { class: 'sync-box', id: 'sync-sug-box' }, domEl('h3', null, '4. Tempo'), list));
+  }
+
+  function suggestionText(s) {
+    const where = s.from === s.to ? `Nella sezione ${sectionName(s.from)}` : `Tra ${sectionName(s.from)} e ${sectionName(s.to)}`;
+    const pct = Math.round(Math.abs(s.factor - 1) * 1000) / 10;
+    const bpms = effectiveSectionBpms(song);
+    const deltas = [];
+    for (let i = s.from; i <= s.to; i++) deltas.push(Math.round(bpms[i] * (s.factor - 1) * 10) / 10);
+    const sign = (v) => (v >= 0 ? '+' : '−') + formatBpm(Math.abs(v));
+    const lo = Math.min(...deltas);
+    const hi = Math.max(...deltas);
+    const bpmTxt = lo === hi ? `${sign(lo)} BPM circa` : `da ${sign(lo)} a ${sign(hi)} BPM circa`;
+    return `${where} l’audio va il ${formatBpm(pct)}% ${s.factor > 1 ? 'più veloce' : 'più lento'}: ${bpmTxt} su ogni sezione.`;
   }
 
   function nextAfter(i) {
@@ -272,7 +297,42 @@ export function openSyncScreen({ song, persist, onClose, blob = null }) {
     render();
   }
 
+  // Fixed bottom bar: the two big tap buttons and the transport are always in view; the rest is behind "⋯".
+  const firstBtn = domEl('button', { type: 'button', class: 'btn primary sync-big', id: 'sync-first', onclick: tapFirstChord }, 'Primo accordo!');
+  const nextBtn = domEl('button', { type: 'button', class: 'btn primary sync-big', id: 'sync-next', onclick: () => { if (setAnchorAt(nextIdx, now())) { nextIdx = nextAfter(nextIdx); render(); } } }, '');
+  const moreBox = domEl('div', { class: 'sync-more', id: 'sync-more', hidden: true },
+    scrub,
+    domEl('button', { type: 'button', class: 'btn', id: 'sync-listen', onclick: () => listenFrom(listenFromSec(song.audio.offsetSec), true) }, 'Ascolta dall’inizio (con il clic)'));
+  const moreBtn = domEl('button', {
+    type: 'button', class: 'btn', id: 'sync-more-btn', 'aria-label': 'Altri comandi', 'aria-expanded': 'false', 'aria-controls': 'sync-more',
+    onclick: () => { moreBox.hidden = !moreBox.hidden; moreBtn.setAttribute('aria-expanded', String(!moreBox.hidden)); overlay.style.setProperty('--sync-bar-h', bar.offsetHeight + 'px'); },
+  }, '⋯');
+  const bar = domEl('div', { class: 'sync-transport', id: 'sync-transport', hidden: true },
+    domEl('div', { class: 'sync-big-row' }, firstBtn, nextBtn),
+    domEl('div', { class: 'sync-trow' },
+      domEl('button', { type: 'button', class: 'btn', id: 'sync-back5', 'aria-label': '5 secondi indietro', onclick: () => { if (player) player.seek(Math.max(0, now() - SYNC_SKIP_SEC)); } }, '−5 s'),
+      playBtn,
+      domEl('button', { type: 'button', class: 'btn', id: 'sync-fwd5', 'aria-label': '5 secondi avanti', onclick: () => { if (player) player.seek(now() + SYNC_SKIP_SEC); } }, '+5 s'),
+      posLbl,
+      moreBtn),
+    moreBox);
+
+  function paintBar() {
+    bar.hidden = !(song.audio && currentBlob);
+    overlay.style.setProperty('--sync-bar-h', bar.hidden ? '0px' : bar.offsetHeight + 'px');
+    const n = song.sections.length;
+    if (nextIdx >= n) {
+      nextBtn.disabled = true;
+      nextBtn.textContent = '⚓ Tutte fissate';
+    } else {
+      nextBtn.disabled = false;
+      nextBtn.textContent = `⚓ ${sectionName(nextIdx)}`;
+      nextBtn.setAttribute('aria-label', `Inizio sezione: ${sectionName(nextIdx)}`);
+    }
+  }
+
   const close = () => {
+    if (msgTimer) clearTimeout(msgTimer);
     if (player) player.destroy();
     player = null;
     delete window.__gappSync;
@@ -288,14 +348,9 @@ export function openSyncScreen({ song, persist, onClose, blob = null }) {
     domEl('div', { class: 'sync-head' },
       domEl('div', { class: 'rec-title' }, 'Sincronizza audio'),
       domEl('button', { type: 'button', class: 'btn primary', id: 'sync-close', onclick: close }, 'Fatto')),
-    msg,
-    domEl('div', { class: 'sync-transport', id: 'sync-transport' },
-      domEl('div', { class: 'row' },
-        domEl('button', { type: 'button', class: 'btn', id: 'sync-back5', 'aria-label': '5 secondi indietro', onclick: () => { if (player) player.seek(Math.max(0, now() - SYNC_SKIP_SEC)); } }, '−5 s'),
-        playBtn,
-        domEl('button', { type: 'button', class: 'btn', id: 'sync-fwd5', 'aria-label': '5 secondi avanti', onclick: () => { if (player) player.seek(now() + SYNC_SKIP_SEC); } }, '+5 s')),
-      posLbl, scrub),
     dyn,
+    msg,
+    bar,
     fileInput);
 
   function start() {

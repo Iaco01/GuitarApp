@@ -62,12 +62,21 @@ function renderRestLabel(chord, ref, onTap, showBeats) {
 export function renderLine(song, line, sectionIndex, lineIndex, onTap, showBeats) {
   const { instrumental, items } = buildLineGroups(line);
   if (items.length === 0 || !line.chords.length) return domEl('div', { class: 'line plain' }, line.lyric);
+  // Chord labels hang over the text without taking room (zero-width holder). The text under a chord is
+  // widened only when its label would touch the next label of the same line: by what is missing.
+  const order = line.chords.map((c, index) => ({ c, index })).sort((x, y) => x.c.col - y.c.col || x.index - y.index);
+  const gapToNext = new Map(order.map((o, k) => [o.index, k + 1 < order.length ? order[k + 1].c.col - o.c.col : null]));
   const renderSeg = (s) => {
     const chord = line.chords[s.index];
     const ref = `${sectionIndex}.${lineIndex}.${s.index}`;
-    const width = (chord.rest ? 5 : displayChordName(song, chord.name).length) + (chord.mark ? chord.mark.length : 0) + 1;
-    return domEl('span', { class: 'seg', style: { minWidth: width + 'ch' } },
-      renderChordLabel(song, chord, ref, onTap, showBeats),
+    const need = (chord.rest ? 5 : displayChordName(song, chord.name).length) + (chord.mark ? chord.mark.length : 0) + (showBeats ? 2 : 0) + 1;
+    const gap = gapToNext.get(s.index);
+    const textLen = s.text.length;
+    let width = 0;
+    if (textLen === 0) width = need; // nothing to hang over (instrumental line, chord past the lyric)
+    else if (gap !== null && gap < need) width = textLen + (need - gap);
+    return domEl('span', { class: 'seg', style: width ? { minWidth: width + 'ch' } : null },
+      domEl('span', { class: 'chw' }, renderChordLabel(song, chord, ref, onTap, showBeats)),
       domEl('span', { class: 'ly' }, s.text));
   };
   const parts = items.map((it) => {

@@ -2,6 +2,7 @@
 // AudioContext time conversion for the metronome clicks over the audio, loop wrap, file matching.
 
 import { effectiveSectionBpms } from './model.js';
+import { buildTimeline } from './timeline.js';
 
 // A tempo suggestion needs a timing error above both limits (a tap is never more precise than this).
 export const SYNC_ERR_MIN_SEC = 0.15;
@@ -179,4 +180,13 @@ export function matchAudioFile(audio, file) {
 // Timing of the "ascolta da qui" check: start 2 s before the offset.
 export function listenFromSec(offsetSec, lead = 2) {
   return Math.max(0, offsetSec - lead);
+}
+
+// Seconds from the start of the first audio event (the offset) to the first chord that is not a rest
+// bar, with the saved tempos: "Primo accordo!" subtracts it from the tap, so an intro that starts with
+// a pause does not shift everything by the length of the pause.
+export function firstChordOffsetSec(song) {
+  const tl = buildTimeline(song, { speed: 1, anchors: { 0: 0 } });
+  const ev = tl.events.find((e) => !e.rest);
+  return ev ? ev.startSec : 0;
 }

@@ -8,7 +8,7 @@ const SPEED_MIN = 50;
 const SPEED_MAX = 100;
 
 // `diagramSvg(label)` (optional) returns the small SVG of a chord shown next to its name.
-export function createPlayPanel(song, { onPlayPause, onStop, onSpeed, onMetronome, onTap, speedPct = 100, metronomeOn = true, diagramSvg = null, diagramsOn = true, onDiagrams = null, onNoticeClosed = null }) {
+export function createPlayPanel(song, { onLoopExit = null, onPlayPause, onStop, onSpeed, onMetronome, onTap, speedPct = 100, metronomeOn = true, diagramSvg = null, diagramsOn = true, onDiagrams = null, onNoticeClosed = null }) {
   const perBar = (song.timeSignature && song.timeSignature[0]) || 4;
   let speed = speedPct;
   let metro = metronomeOn;
@@ -50,6 +50,7 @@ export function createPlayPanel(song, { onPlayPause, onStop, onSpeed, onMetronom
       metro = !metro;
       metroBtn.setAttribute('aria-pressed', String(metro));
       metroBtn.textContent = metro ? 'Clic: sì' : 'Clic: no';
+      paintClick();
       onMetronome(metro);
     },
   }, metro ? 'Clic: sì' : 'Clic: no');
@@ -68,6 +69,20 @@ export function createPlayPanel(song, { onPlayPause, onStop, onSpeed, onMetronom
     dgBtn.textContent = dgOn ? 'Diagrammi: sì' : 'Diagrammi: no';
     el.classList.toggle('pp-nodg', !dgOn);
   }
+  // always visible: click on/off icon and the active loop (tap = leave the loop)
+  const clickIcon = domEl('button', {
+    type: 'button', class: 'btn pp-click', id: 'btn-click-icon', 'aria-pressed': String(metro),
+    onclick: () => metroBtn.click(),
+  });
+  const loopBadge = domEl('button', {
+    type: 'button', class: 'btn pp-loop', id: 'pp-loop', hidden: true, 'aria-label': 'Loop attivo: tocca per uscire',
+    onclick: () => { if (onLoopExit) onLoopExit(); },
+  });
+  function paintClick() {
+    clickIcon.setAttribute('aria-pressed', String(metro));
+    clickIcon.textContent = metro ? '🔔' : '🔕';
+    clickIcon.setAttribute('aria-label', metro ? 'Clic acceso: tocca per spegnere' : 'Clic spento: tocca per accendere');
+  }
   const more = domEl('div', { class: 'pp-more', id: 'pp-more', hidden: true }, speedBox, metroBtn, tapBtn, dgBtn, stopBtn);
   const moreBtn = domEl('button', {
     type: 'button', class: 'btn pp-more-btn', id: 'btn-more', 'aria-label': 'Altri comandi', 'aria-expanded': 'false', 'aria-controls': 'pp-more',
@@ -83,10 +98,11 @@ export function createPlayPanel(song, { onPlayPause, onStop, onSpeed, onMetronom
   const el = domEl('div', { class: 'playpanel', id: 'playpanel', role: 'region', 'aria-label': 'Riproduzione' },
     notice,
     domEl('div', { class: 'pp-row1' }, cur, next, playBtn),
-    domEl('div', { class: 'pp-row2' }, dotsEl, bpmEl, patEl, moreBtn),
+    domEl('div', { class: 'pp-row2' }, dotsEl, bpmEl, patEl, loopBadge, clickIcon, moreBtn),
     more);
 
   paintDg();
+  paintClick();
 
   function setDiagram(holder, label) {
     const key = label === null || !diagramSvg ? '' : label;
@@ -134,7 +150,9 @@ export function createPlayPanel(song, { onPlayPause, onStop, onSpeed, onMetronom
       nextName.style.setProperty('--cc', d.nextEvent && !d.nextEvent.rest ? chordColorVar(song, d.nextEvent.name) : 'var(--muted)');
       nextBadge.textContent = d.nextEvent && d.beatsLeft > 0 ? String(d.beatsLeft) : '';
       dots.forEach((dot, i) => dot.classList.toggle('on', d.beatInBar === i));
-      bpmEl.textContent = `♩ = ${formatBpm(d.bpm)}`;
+      // effective tempo (scaled between anchors); "≈" when it differs from the saved one
+      const approx = Number.isFinite(d.savedBpm) && Math.abs(d.bpm - d.savedBpm) > 0.2;
+      bpmEl.textContent = approx ? `♩ ≈ ${formatBpm(Math.round(d.bpm * 10) / 10)}` : `♩ = ${formatBpm(d.bpm)}`;
       const key = (d.strum ? d.strum.beats.length : 'none') + ':' + d.strumId;
       if (key !== lastKey) {
         lastKey = key;
@@ -157,6 +175,11 @@ export function createPlayPanel(song, { onPlayPause, onStop, onSpeed, onMetronom
       metro = !!on;
       metroBtn.setAttribute('aria-pressed', String(metro));
       metroBtn.textContent = metro ? 'Clic: sì' : 'Clic: no';
+      paintClick();
+    },
+    setLoop(name) {
+      loopBadge.hidden = !name;
+      loopBadge.textContent = name ? `🔁 ${name}` : '';
     },
   };
 }

@@ -10,6 +10,7 @@ import { audioAnchors, formatClock } from '../audiosync.js';
 import { audioStoreGet, audioStoreDelete } from '../audiostore.js';
 import { getDevice } from '../storage.js';
 import { openSyncScreen } from './syncscreen.js';
+import { openAnchorSheet } from './anchorsheet.js';
 import { attachAudioFile, AUDIO_ACCEPT } from './audiofile.js';
 import { createPlayPanel } from './playpanel.js';
 import { openRecorder } from './recorder.js';
@@ -60,6 +61,7 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
   let editMode = false;
   let speed = 1;
   let metronomeOn = true;
+  let panel = null;
   let plainTimeline = buildTimeline(song, { speed });
   let timeline = plainTimeline;
   let audioPlayer = null;
@@ -309,7 +311,7 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
       head.append(tools);
       return;
     }
-    if (song.audio && audioStatus !== 'none') {
+    if (song.audio) {
       const t = si === 0 ? song.audio.offsetSec : song.audio.anchors && song.audio.anchors[si];
       if (t !== undefined) {
         head.append(domEl('button', {
@@ -317,7 +319,7 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
           class: 'sec-anchor',
           'data-sec': si,
           'aria-label': `Ancora audio: ${formatClock(t)}. Tocca per regolare`,
-          onclick: () => openSync(),
+          onclick: () => openAnchorSheet({ song, index: si, name: sectionNameOf(si) || `Sezione ${si + 1}`, onChange: () => { persist(); rebuildTimeline(); buildBody(); } }),
         }, `⚓ ${formatClock(t)}`));
       }
     }
@@ -350,6 +352,7 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
   function setLoopUi(si) {
     for (const el of bodyHolder.querySelectorAll('.looping')) el.classList.remove('looping');
     for (const el of bodyHolder.querySelectorAll('.loop-x')) el.remove();
+    if (panel) panel.setLoop(si === null || si === undefined ? null : sectionNameOf(si) || `Sezione ${si + 1}`);
     if (si === null || si === undefined) return;
     const head = bodyHolder.querySelector(`.sec-head[data-sec="${si}"]`);
     if (!head) return;
@@ -529,7 +532,6 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
   const noteManualScroll = () => { manualScrollUntil = Date.now() + MANUAL_SCROLL_PAUSE_MS; };
   for (const ev of ['wheel', 'touchstart', 'touchmove', 'keydown']) window.addEventListener(ev, noteManualScroll, { passive: true });
 
-  let panel;
   function onFrame(info) {
     gapp.player.state = info.state;
     gapp.player.timeSec = info.timeSec;
@@ -565,6 +567,7 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
         nextLabel: nextEvent ? evLabel(nextEvent) : undefined,
         beatInBar: info.state === 'counting' ? timeline.events.length ? perBarIndexFromCountdown(info.countdown) : -1 : beat ? beat.beatInBar : -1,
         bpm: timeline.sections[secIdx] ? timeline.sections[secIdx].bpm : 80,
+        savedBpm: timeline.sections[secIdx] ? timeline.sections[secIdx].savedBpm : undefined,
         strum,
         strumId: section ? section.strumIndex : null,
         strumCell,
@@ -615,6 +618,7 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
 
   panel = createPlayPanel(song, {
     diagramSvg: smallDiagramSvg,
+    onLoopExit: () => { player.setLoop(null); setLoopUi(null); },
     onPlayPause: () => {
       const st = player.getState();
       if (st === 'playing' || st === 'counting') player.pause();
