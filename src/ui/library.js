@@ -134,7 +134,7 @@ export function showLibraryScreen(root, { onImportFile, message }) {
     const list = domEl('ul', { class: 'songs' });
     for (const s of shown) {
       const meta = [s.artist, s.difficulty, formatDateIt(s.importedAt)].filter(Boolean).join(' · ');
-      const edited = s.timingSource && s.timingSource !== 'default';
+      const edited = s.timingSource === 'edited' || s.timingSource === 'recorded';
       list.append(domEl('li', { 'data-id': s.id },
         domEl('a', { class: 'song-row', href: '#/song/' + encodeURIComponent(s.id) },
           domEl('span', { class: 'song-title' }, s.title || 'Senza titolo'),

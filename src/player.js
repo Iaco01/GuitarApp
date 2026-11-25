@@ -112,6 +112,7 @@ export function createPlayer({ timeline, timeSignature = [4, 4], onFrame, onStat
   const wake = createWakeKeeper({ onNotice, isDestroyed: () => destroyed });
   const acquireWake = wake.acquire;
   const releaseWake = wake.release;
+  const pending = [];
   let countSpb = 0.5;
   let countBeats = timeSignature[0] || 4;
   let destroyed = false;
@@ -170,6 +171,18 @@ export function createPlayer({ timeline, timeSignature = [4, 4], onFrame, onStat
     gain.connect(ctx.destination);
     osc.start(when);
     osc.stop(when + 0.04);
+    pending.push({ osc, when });
+    if (pending.length > 64) pending.splice(0, pending.length - 32);
+  }
+
+  // Silences the clicks already scheduled but not yet heard (before rebuilding the beat grid).
+  function cancelPendingClicks() {
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    for (const p of pending) {
+      if (p.when > now) { try { p.osc.stop(now); } catch { /* ignore */ } }
+    }
+    pending.length = 0;
   }
 
   function tick() {
@@ -283,6 +296,7 @@ export function createPlayer({ timeline, timeSignature = [4, 4], onFrame, onStat
     }
     if (!live) return;
     if (state === 'playing') {
+      cancelPendingClicks();
       offset = timeAtBeatPosition(tl, beatPos);
       anchor = clock() - latency();
     } else {

@@ -191,12 +191,19 @@ h1, h2, h3, p, ul, ol, dl, dd { margin: 0; }
 .pp-dg { flex: none; display: block; width: 30px; color: var(--fg); }
 .pp-dg:empty { display: none; }
 .pp-row2 { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.pp-dots { display: flex; gap: 6px; flex: none; }
+.pp-dots { display: flex; gap: 5px; flex: none; }
 .pp-dot { width: 13px; height: 13px; border-radius: 50%; border: 2px solid var(--line); }
 .pp-dot.acc { border-color: var(--accent); }
 .pp-dot.on { background: var(--fg); border-color: var(--fg); }
 .pp-dot.acc.on { background: var(--accent); border-color: var(--accent); }
-.pp-bpm { flex: none; font: 700 14px var(--ui); white-space: nowrap; }
+.pp-bpm { flex: none; font: 700 14px var(--ui); white-space: nowrap; background: none; border: 0; color: var(--fg); min-height: 40px; padding: 0 3px; cursor: pointer; }
+.pp-bpmbox { display: flex; align-items: center; flex: none; }
+.playpanel .btn.pp-bpm-step { min-width: 34px; width: 34px; padding: 0; font-size: 20px; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+.pp-scope[hidden] { display: none; }
+.playpanel .btn.pp-scope { flex: none; min-width: 0; padding: 0 6px; font-size: 12px; }
+.pp-bpmedit { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.pp-bpmedit[hidden], .pp-bpmnote[hidden] { display: none; }
+.pp-bpmnote .btn { min-height: 32px !important; }
 .pp-pat { flex: 1 1 0; min-width: 0; display: flex; gap: 1px; overflow: hidden; }
 .pp-cell { flex: 1 1 0; min-width: 6px; max-width: 14px; text-align: center; font: 700 11px var(--mono); color: var(--muted); border-radius: 3px; }
 .pp-cell.on { color: var(--fg); background: color-mix(in srgb, var(--accent) 20%, transparent); }
@@ -367,3 +374,6 @@ h1, h2, h3, p, ul, ol, dl, dd { margin: 0; }
 .pp-loop[hidden] { display: none; }
 .badge.missing { background: color-mix(in srgb, #f08c00 35%, transparent); color: var(--fg); font-weight: 700; }
 .sheet { z-index: 40; }
+
+.eb-note { font: 12px/1.3 var(--ui); color: var(--muted); }
+.eb-note[hidden] { display: none; }

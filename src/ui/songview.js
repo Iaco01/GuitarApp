@@ -17,7 +17,8 @@ import { openRecorder } from './recorder.js';
 import { createTapTempo } from '../taprecord.js';
 import { displayChordName } from '../transpose.js';
 import { openChordSheet, openCapoSheet, renderDiagramRow, smallDiagramSvg } from './chordsheet.js';
-import { effectiveSectionBpms, groupRepeatedSections, setAllChordBeats, sectionSignature, baseSectionName, insertPause, removePause } from '../model.js';
+import { effectiveSectionBpms, groupRepeatedSections, setAllChordBeats, sectionSignature, baseSectionName, insertPause, removePause, hasEditedDurations, applyBpmChange, snapshotBpms, restoreBpms } from '../model.js';
+import { estimateSongDurations } from '../durations.js';
 
 const FONT_MIN = 0.7;
 const FONT_MAX = 2.0;
@@ -80,6 +81,7 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
   let manualScrollUntil = 0;
   const openedDetails = new Set();
   const tapTempo = createTapTempo();
+  let bpmUndo = null; // { snap, index, base } while a BPM change made from the panel can be undone
 
   const disp = (name) => displayChordName(song, name);
   const evLabel = (ev) => (ev.rest ? '—' : disp(ev.name));
@@ -421,6 +423,7 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
       decorate: decorateSection,
     }));
     mapRefs();
+    paintEstNote();
     setLoopUi(player.getLoop());
     if (selectedRef) {
       const el = bodyHolder.querySelector(`.ch[data-ref="${selectedRef}"]`);
@@ -460,21 +463,37 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
       rebuildTimeline();
       refreshBpmButtons();
     };
+    const mode = song.view.durationMode === 'fixed' ? 'fixed' : 'estimated';
+    const applyDurations = (newMode, n) => {
+      if (hasEditedDurations(song) && !window.confirm('Perderai le durate modificate. Continuare?')) return;
+      song.view.durationMode = newMode;
+      song.view.beatsPerChord = n;
+      if (newMode === 'estimated') {
+        song.sections = estimateSongDurations(song, { beatsPerChordAvg: n }).sections;
+        song.timingSource = 'estimated';
+      } else {
+        setAllChordBeats(song, n);
+        song.timingSource = 'default';
+      }
+      persist();
+      buildSettings();
+      buildBody();
+      rebuildTimeline();
+      paintEstNote();
+    };
+    const modeBtns = [['estimated', 'Stimate dal testo'], ['fixed', 'Fisse']].map(([m, label]) => domEl('button', {
+      type: 'button',
+      class: 'btn mode-opt',
+      'data-mode': m,
+      'aria-pressed': String(mode === m),
+      onclick: () => { if (mode !== m) applyDurations(m, song.view.beatsPerChord || 4); },
+    }, label));
     const beatsBtns = [2, 4, 8].map((n) => domEl('button', {
       type: 'button',
       class: 'btn beats-opt',
       'data-beats': n,
       'aria-pressed': String(song.view.beatsPerChord === n),
-      onclick: () => {
-        if (song.timingSource !== 'default' && !window.confirm('Perderai le durate modificate. Continuare?')) return;
-        song.view.beatsPerChord = n;
-        setAllChordBeats(song, n);
-        song.timingSource = 'default';
-        persist();
-        buildSettings();
-        buildBody();
-        rebuildTimeline();
-      },
+      onclick: () => applyDurations(mode, n),
     }, String(n)));
     settingsHolder.append(domEl('details', { class: 'settings' },
       domEl('summary', null, 'Impostazioni del brano'),
@@ -483,9 +502,68 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
         input,
         domEl('button', { type: 'button', class: 'btn', id: 'bpm-save', onclick: saveBpm }, 'Salva')),
       domEl('div', { class: 'set-row' },
-        domEl('span', null, 'Battiti per accordo'),
-        domEl('div', { class: 'seg-btns', role: 'group', 'aria-label': 'Battiti per accordo' }, beatsBtns))));
+        domEl('span', null, 'Durate'),
+        domEl('div', { class: 'seg-btns', role: 'group', 'aria-label': 'Durate degli accordi' }, modeBtns)),
+      domEl('div', { class: 'set-row' },
+        domEl('span', null, mode === 'estimated' ? 'Durata media (battiti)' : 'Battiti per accordo'),
+        domEl('div', { class: 'seg-btns', role: 'group', 'aria-label': mode === 'estimated' ? 'Durata media' : 'Battiti per accordo' }, beatsBtns))));
   };
+
+  // ---- BPM from the play panel ----
+  function currentSectionIndex() {
+    const info = player.getInfo();
+    const i = info.state === 'counting' ? info.startEvent : info.eventIndex;
+    const ev = timeline.events[i >= 0 ? i : 0];
+    return ev ? ev.sectionIndex : 0;
+  }
+
+  function paintBpmNote() {
+    if (!bpmUndo || player !== audioPlayer) {
+      panel.setBpmNote('');
+      return;
+    }
+    const now = effectiveSectionBpms(song)[bpmUndo.index];
+    const d = Math.round((now - bpmUndo.base) * 10) / 10;
+    if (d === 0) {
+      panel.setBpmNote('');
+      return;
+    }
+    panel.setBpmNote(`${d > 0 ? '+' : '−'}${formatBpm(Math.abs(d))} BPM ${song.view.bpmScope === 'section' ? 'su questa sezione' : 'su tutto il brano'}`);
+  }
+
+  function refreshAfterBpm() {
+    persist();
+    buildMeta();
+    rebuildTimeline();
+    refreshBpmButtons();
+    lastKey = '';
+    if (player.getState() === 'stopped') idlePanel();
+    else onFrame(player.getInfo());
+    paintBpmNote();
+  }
+
+  const tempoKey = () => JSON.stringify(snapshotBpms(song));
+
+  // A run of changes from the panel starts from one snapshot: the "whole song" scaling is always
+  // computed from it (no rounding drift after many steps) and "Annulla" returns to it. Tempos changed
+  // elsewhere (section header, tap tempo, sync screen) start a new run.
+  function changeBpm(newValue) {
+    const index = currentSectionIndex();
+    const scope = song.view.bpmScope === 'section' ? 'section' : 'all';
+    if (bpmUndo && bpmUndo.key !== tempoKey()) bpmUndo = null;
+    if (!bpmUndo) bpmUndo = { snap: snapshotBpms(song), index, base: effectiveSectionBpms(song)[index], key: '' };
+    else if (scope === 'all') restoreBpms(song, bpmUndo.snap);
+    applyBpmChange(song, index, newValue, scope);
+    bpmUndo.key = tempoKey();
+    refreshAfterBpm();
+  }
+
+  function stepBpm(dir) {
+    const cur = effectiveSectionBpms(song)[currentSectionIndex()];
+    const v = Math.min(BPM_MAX, Math.max(BPM_MIN, Math.round((cur + dir) * 10) / 10));
+    if (v === cur) return;
+    changeBpm(v);
+  }
 
   // ---- playback highlight ----
   // `startEvent` >= 0 while counting in: nothing is current yet, that chord is the next one.
@@ -658,6 +736,29 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
       refreshBpmButtons();
       lastKey = '';
     },
+    bpmScope: song.view.bpmScope === 'section' ? 'section' : 'all',
+    onBpmStep: (dir) => stepBpm(dir),
+    onBpmSet: (v) => {
+      if (!(v >= BPM_MIN && v <= BPM_MAX)) {
+        showError(`Inserisci un BPM tra ${BPM_MIN} e ${BPM_MAX}`);
+        return false;
+      }
+      showNote('');
+      changeBpm(v);
+      return true;
+    },
+    onScope: (scope) => {
+      song.view.bpmScope = scope;
+      persist();
+      bpmUndo = null;
+      paintBpmNote();
+    },
+    onBpmUndo: () => {
+      if (!bpmUndo) return;
+      restoreBpms(song, bpmUndo.snap);
+      bpmUndo = null;
+      refreshAfterBpm();
+    },
     speedPct: 100,
     metronomeOn,
     // short screens: small diagrams in the panel are off unless the user turned them on
@@ -694,8 +795,12 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
       rebuildTimeline();
     },
   }, 'Elimina pausa');
+  const estNote = domEl('div', { class: 'eb-note', id: 'eb-note', hidden: true }, 'Durate stimate dalla posizione degli accordi sul testo: controllale e correggile con −/+ o con la registrazione a tap');
+  function paintEstNote() {
+    estNote.hidden = song.timingSource !== 'estimated';
+  }
   const recAllBtn = domEl('button', { type: 'button', class: 'btn', id: 'btn-rec-all', onclick: () => startRecording(0, timeline.events.length, 'tutto il brano') }, 'Registra tutto il brano');
-  const editBar = domEl('div', { class: 'playpanel editbar', id: 'editbar', hidden: true }, editInfo, stepper, delPauseBtn, recAllBtn);
+  const editBar = domEl('div', { class: 'playpanel editbar', id: 'editbar', hidden: true }, estNote, editInfo, stepper, delPauseBtn, recAllBtn);
 
   function selectedChord() {
     if (!selectedRef) return null;
@@ -728,6 +833,7 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
     if (!chord) return;
     chord.beats = Math.min(BEATS_MAX, Math.max(BEATS_MIN, chord.beats + d));
     song.timingSource = 'edited';
+    paintEstNote();
     stepVal.textContent = String(chord.beats);
     const el = bodyHolder.querySelector(`.ch[data-ref="${selectedRef}"] .bt`);
     if (el) el.textContent = String(chord.beats);
@@ -749,6 +855,7 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
       clearSelection();
       panel.el.hidden = editMode;
       editBar.hidden = !editMode;
+      paintEstNote();
       buildBody();
       syncPad();
     },

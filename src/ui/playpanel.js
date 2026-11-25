@@ -8,7 +8,7 @@ const SPEED_MIN = 50;
 const SPEED_MAX = 100;
 
 // `diagramSvg(label)` (optional) returns the small SVG of a chord shown next to its name.
-export function createPlayPanel(song, { onLoopExit = null, onPlayPause, onStop, onSpeed, onMetronome, onTap, speedPct = 100, metronomeOn = true, diagramSvg = null, diagramsOn = true, onDiagrams = null, onNoticeClosed = null }) {
+export function createPlayPanel(song, { onLoopExit = null, onPlayPause, onStop, onSpeed, onMetronome, onTap, speedPct = 100, metronomeOn = true, diagramSvg = null, diagramsOn = true, onDiagrams = null, onNoticeClosed = null, onBpmStep = null, onBpmSet = null, onScope = null, onBpmUndo = null, bpmScope = 'all' }) {
   const perBar = (song.timeSignature && song.timeSignature[0]) || 4;
   let speed = speedPct;
   let metro = metronomeOn;
@@ -29,7 +29,71 @@ export function createPlayPanel(song, { onLoopExit = null, onPlayPause, onStop, 
     dots.push(d);
     dotsEl.append(d);
   }
-  const bpmEl = domEl('span', { class: 'pp-bpm', id: 'pp-bpm' }, '');
+  // BPM control: − / + (hold to repeat), tap on the number opens a field, scope switch next to it
+  const HOLD_DELAY_MS = 450;
+  const HOLD_EVERY_MS = 200;
+  let scope = bpmScope;
+  function holdButton(id, label, dir, aria) {
+    let timer = null;
+    let iv = null;
+    const stop = () => {
+      if (timer !== null) clearTimeout(timer);
+      if (iv !== null) clearInterval(iv);
+      timer = iv = null;
+    };
+    const step = () => { if (onBpmStep) onBpmStep(dir); };
+    const b = domEl('button', { type: 'button', class: 'btn icon pp-bpm-step', id, 'aria-label': aria }, label);
+    b.addEventListener('pointerdown', (e) => {
+      if (e.button !== undefined && e.button > 0) return;
+      stop();
+      step();
+      timer = setTimeout(() => { timer = null; iv = setInterval(step, HOLD_EVERY_MS); }, HOLD_DELAY_MS);
+    });
+    for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) b.addEventListener(ev, stop);
+    b.addEventListener('click', (e) => { if (e.detail === 0) step(); }); // keyboard
+    b.addEventListener('contextmenu', (e) => e.preventDefault());
+    return b;
+  }
+  const bpmEl = domEl('button', { type: 'button', class: 'pp-bpm', id: 'pp-bpm', 'aria-label': 'BPM: tocca per scriverlo', onclick: () => toggleBpmEdit() }, '');
+  const bpmMinus = holdButton('btn-bpm-down', '−', -1, 'Un BPM in meno');
+  const bpmPlus = holdButton('btn-bpm-up', '+', 1, 'Un BPM in più');
+  const toggleScope = () => {
+    scope = scope === 'all' ? 'section' : 'all';
+    paintScope();
+    if (onScope) onScope(scope);
+  };
+  // in the row only while the scope is "this section" (a chip that returns to "whole song"); the full
+  // switch lives in the field that opens when the number is tapped (no room for both on 360 px)
+  const scopeBtn = domEl('button', { type: 'button', class: 'btn pp-scope', id: 'btn-bpm-scope', onclick: toggleScope });
+  const scopeBtn2 = domEl('button', { type: 'button', class: 'btn small', id: 'btn-bpm-scope2', onclick: toggleScope });
+  function paintScope() {
+    const all = scope === 'all';
+    scopeBtn.hidden = all;
+    scopeBtn.textContent = 'Sez.';
+    scopeBtn.setAttribute('aria-label', 'BPM: cambia solo questa sezione. Tocca per cambiare tutto il brano');
+    scopeBtn2.textContent = all ? 'Tutto il brano' : 'Solo questa sezione';
+    scopeBtn2.setAttribute('aria-label', all ? 'BPM: cambia tutto il brano. Tocca per cambiare solo la sezione' : 'BPM: cambia solo questa sezione. Tocca per cambiare tutto il brano');
+    scopeBtn.dataset.scope = scopeBtn2.dataset.scope = scope;
+  }
+  const bpmBox = domEl('div', { class: 'pp-bpmbox', role: 'group', 'aria-label': 'BPM' }, bpmMinus, bpmEl, bpmPlus);
+  const bpmField = domEl('input', { type: 'number', inputmode: 'decimal', min: '30', max: '300', step: '1', class: 'bpm-field', id: 'pp-bpm-field', 'aria-label': 'BPM' });
+  const bpmEdit = domEl('div', { class: 'pp-bpmedit', id: 'pp-bpmedit', hidden: true },
+    bpmField,
+    scopeBtn2,
+    domEl('button', { type: 'button', class: 'btn primary small', id: 'pp-bpm-apply', onclick: () => { const v = parseFloat(String(bpmField.value).replace(',', '.')); if (onBpmSet && onBpmSet(v) !== false) bpmEdit.hidden = true; } }, 'Applica'),
+    domEl('button', { type: 'button', class: 'btn small', onclick: () => { if (onTap) onTap(); } }, 'Tap tempo'),
+    domEl('button', { type: 'button', class: 'btn small', onclick: () => { bpmEdit.hidden = true; } }, 'Chiudi'));
+  function toggleBpmEdit() {
+    bpmEdit.hidden = !bpmEdit.hidden;
+    if (!bpmEdit.hidden) {
+      bpmField.value = (bpmEl.dataset.v || '').replace(',', '.');
+      bpmField.focus();
+      bpmField.select();
+    }
+  }
+  const bpmNoteText = domEl('span', { id: 'pp-bpm-note-text' }, '');
+  const bpmNote = domEl('div', { class: 'pp-notice pp-bpmnote', id: 'pp-bpm-note', role: 'status', hidden: true }, bpmNoteText,
+    domEl('button', { type: 'button', class: 'btn small', id: 'btn-bpm-undo', onclick: () => { if (onBpmUndo) onBpmUndo(); } }, 'Annulla'));
   const patEl = domEl('div', { class: 'pp-pat', id: 'pp-pattern' });
 
   const playBtn = domEl('button', { type: 'button', class: 'btn primary pp-play', id: 'btn-play', 'aria-label': 'Avvia', onclick: onPlayPause }, 'Play');
@@ -97,10 +161,13 @@ export function createPlayPanel(song, { onLoopExit = null, onPlayPause, onStop, 
 
   const el = domEl('div', { class: 'playpanel', id: 'playpanel', role: 'region', 'aria-label': 'Riproduzione' },
     notice,
+    bpmNote,
     domEl('div', { class: 'pp-row1' }, cur, next, playBtn),
-    domEl('div', { class: 'pp-row2' }, dotsEl, bpmEl, patEl, loopBadge, clickIcon, moreBtn),
+    domEl('div', { class: 'pp-row2' }, dotsEl, bpmBox, scopeBtn, patEl, loopBadge, clickIcon, moreBtn),
+    bpmEdit,
     more);
 
+  paintScope();
   paintDg();
   paintClick();
 
@@ -153,6 +220,7 @@ export function createPlayPanel(song, { onLoopExit = null, onPlayPause, onStop, 
       // effective tempo (scaled between anchors); "≈" when it differs from the saved one
       const approx = Number.isFinite(d.savedBpm) && Math.abs(d.bpm - d.savedBpm) > 0.2;
       bpmEl.textContent = approx ? `♩ ≈ ${formatBpm(Math.round(d.bpm * 10) / 10)}` : `♩ = ${formatBpm(d.bpm)}`;
+      bpmEl.dataset.v = formatBpm(Number.isFinite(d.savedBpm) ? d.savedBpm : d.bpm);
       const key = (d.strum ? d.strum.beats.length : 'none') + ':' + d.strumId;
       if (key !== lastKey) {
         lastKey = key;
@@ -161,6 +229,18 @@ export function createPlayPanel(song, { onLoopExit = null, onPlayPause, onStop, 
         const cells = patEl.children;
         for (let i = 0; i < cells.length; i++) cells[i].classList.toggle('now', i === d.strumCell);
       }
+    },
+    // "+2 BPM su tutto il brano" with an undo button (audio mode); empty text hides it
+    setBpmNote(text) {
+      bpmNoteText.textContent = text || '';
+      bpmNote.hidden = !text;
+    },
+    setScope(v) {
+      scope = v;
+      paintScope();
+    },
+    closeBpmEdit() {
+      bpmEdit.hidden = true;
     },
     showNotice(text) {
       noticeText.textContent = text;

@@ -239,7 +239,7 @@ export function createAudioPlayer({ timeline, blob, latencyMs = 0, onFrame, onSt
     setTimeline(next) {
       tl = next;
       core = createMediaClickCore({ beats: tl.beats });
-      if (state === 'playing') core.reset(el.currentTime);
+      if (state === 'playing') resetClicks(el.currentTime);
       if (state !== 'playing' && onFrame) onFrame(info());
     },
     setMetronome(on) {

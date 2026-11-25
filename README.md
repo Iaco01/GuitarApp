@@ -7,7 +7,7 @@ Web app statica per telefono: importa una pagina Ultimate Guitar salvata come fi
 - **Importazione** di una pagina Ultimate Guitar salvata (.mht): titolo, artista, difficoltà, accordatura, capotasto, sezioni, accordi sopra la sillaba giusta, ritmo (strumming) e BPM per sezione.
 - **Lettura**: accordi colorati, scala del testo (A−/A+), tema chiaro/scuro, ritornelli uguali compressi; scala e tema sono ricordati per brano.
 - **Suonare a tempo**: Play con conteggio, accordo corrente evidenziato, pannello con accordo, "Poi" con battiti mancanti, pallini del battito, BPM e ritmo; metronomo (clic), velocità 50–100%, tap tempo, diagrammi nel pannello, salto toccando un accordo, loop di sezione (pressione lunga sull'intestazione), schermo sempre acceso (Wake Lock dove c'è).
-- **Durate**: modifica dei battiti per accordo, copia sui ritornelli uguali, battute di pausa, registrazione a tap, BPM per sezione.
+- **Durate**: all'import (e per i brani già in libreria) le durate sono stimate da dove cade ogni accordo sulle sillabe del testo; si possono tornare a durate fisse 2/4/8, correggere accordo per accordo, copiare sui ritornelli uguali, aggiungere battute di pausa, registrare a tap. **BPM** per sezione e, durante il play, controllo − / + nel pannello (pressione prolungata = ripetizione, tocco sul numero = campo e tap tempo) su tutto il brano in proporzione o solo sulla sezione corrente, senza far saltare la posizione.
 - **Trasposizione** ±12 semitoni, **capotasto** 0–12 con suggerimento di 3 opzioni, diagrammi di tutti gli accordi (anche forme del capotasto).
 - **Libreria**: ricerca, ordinamento, esportazione e importazione JSON (dell'audio si esportano solo i metadati), badge "durate" e "audio" (o "audio mancante" se il file non è nel browser).
 - **Audio sincronizzato**: carichi un file audio (resta nel telefono, in IndexedDB), fissi l'inizio con «Primo accordo!», segni facoltativamente l'inizio delle sezioni (⚓ ancore, regolabili a ±10/±50 ms) e la fine del brano; l'app scala i tempi tra due ancore e suggerisce di correggere i BPM. Calibrazione della latenza per cuffie Bluetooth.
@@ -46,6 +46,7 @@ node test/e2e/round4-tester-audio.cjs [B1|B3|...]   # precisione dell'evidenziaz
 node test/e2e/round4-tester-anchors.cjs             # ancore nelle intestazioni
 node test/e2e/round5.cjs             # round 5: sincronizzazione, pannello, libreria, ancore
 node test/e2e/round5-text.cjs        # spaziatura del testo sotto gli accordi (file reale)
+node test/e2e/round6.cjs             # round 6: durate stimate, − / + del BPM in play (file reale e audio sintetico)
 ```
 
 Screenshot e numeri vanno in `test-artifacts/` (ignorato da git).
