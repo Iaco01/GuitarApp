@@ -90,15 +90,20 @@ export function analyseAndAlign(args) {
 // Same computation as a generator (yields every few tens of ms of work): drive it with runSteps (all at
 // once) or runStepsAsync (slices with an await between them, progress bar and cancel in the app).
 // onProgress(0..1) is called along the way.
+// opts.ownsSamples: the samples are not needed by the caller afterwards (the app): they are normalised in place and
+// released as soon as the features are computed.
 export function* analyseAndAlignSteps({ samples, sampleRate, song, onProgress = null, now = () => Date.now(), opts = {} }) {
   const t0 = now();
   const timings = {};
   const lap = (k, since) => { timings[k] = now() - since; return now(); };
   let tk = now();
-  const x = resampleMono(samples, sampleRate, FEATURE_RATE);
+  let x = resampleMono(samples, sampleRate, FEATURE_RATE);
+  const inPlace = !!opts.ownsSamples && x === samples;
   tk = lap('resample', tk);
   yield;
-  const feat = yield* computeFeaturesSteps(x, { ...(opts.feat || {}), onProgress: onProgress ? (f) => onProgress(0.05 + 0.45 * f) : null });
+  const feat = yield* computeFeaturesSteps(x, { ...(opts.feat || {}), inPlace, onProgress: onProgress ? (f) => onProgress(0.05 + 0.45 * f) : null });
+  x = null;
+  if (opts.ownsSamples) samples = null;
   tk = lap('features', tk);
   const events = songEvents(song);
   // the capo is not considered: the written chords are the sounding ones (see transpose.js)

@@ -111,8 +111,8 @@ const rampRefine = (x, lo, hi) => Math.max(0, Math.min(1, (x - lo) / (hi - lo)))
 const STRUM_STRENGTH = 10;
 export const FREE_CONF_MAX = 0.55;
 // confidence given by the sharpness of the chroma boundary alone (a crisp boundary is right 82-100% of the time from 6 on)
-const REFINE_SHARP_LO = 4;
-const REFINE_SHARP_HI = 7;
+const REFINE_SHARP_LO = 3.5;
+const REFINE_SHARP_HI = 6.5;
 
 // The boundary of one event of a section without a stable beat, from the two estimators: the one of the alignment
 // (`tChroma`, with its sharpness) and the refined one. Returns { t, conf, kind }:

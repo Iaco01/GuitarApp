@@ -22,6 +22,8 @@ const INTRO_FRAME = 0.3;
 // (audio shorter than the sheet) cost less than a section in the middle
 const SKIP_TAIL = 5;
 const SKIP_MID = 12;
+// the last events are skipped only when what is left of the audio is shorter than this share of their expected length
+const TAIL_LEFT_FRAC = 0.35;
 const MARGIN_SHIFTS = [0.25, 0.5, 1];
 // inner-loop steps of the Viterbi between two yields (about 5-10 ms of work in Node)
 const VITERBI_SLICE_WORK = 1.5e6;
@@ -167,6 +169,10 @@ function* viterbi({ cumE, cumG, cumG0 = null, T, chordOf, N, stride, lo, hi, dmi
   const skipFlag = segs ? segs.map(() => new Uint8Array(U + 1)) : null;
   if (segs) segs.forEach((g, k) => { segStart[g.a] = k; segEnd[g.b] = k; });
   let pre = null;
+  // the best scores of the last skippable section before it was merged with its skipped alternative: a gap may not start
+  // from a skip (a section that is skipped leaves no room for other music: otherwise any poorly matching section could be
+  // explained away as skipped, with its audio as a gap)
+  let normalPrev = null;
   const endScore = tailCost ? new Float64Array(N) : null;
   const endAt = tailCost ? new Int32Array(N) : null;
   for (let j = 0; j < N; j++) {
@@ -184,10 +190,11 @@ function* viterbi({ cumE, cumG, cumG0 = null, T, chordOf, N, stride, lo, hi, dmi
     let from = prev;
     if (j > 0 && gapBefore && gapBefore[j]) {
       let gg = -Infinity;
+      const gapSrc = segEnd[j - 1] >= 0 && normalPrev ? normalPrev : prev;
       for (let u = 0; u <= U; u++) {
         let flags = 0;
         if (u > 0) {
-          const st = prev[u - 1] - gapStart;
+          const st = gapSrc[u - 1] - gapStart;
           if (gg >= st) flags |= 2;
           else gg = st;
           gg += gcum(u) - gcum(u - 1);
@@ -219,6 +226,7 @@ function* viterbi({ cumE, cumG, cumG0 = null, T, chordOf, N, stride, lo, hi, dmi
     if (segEnd[j] >= 0) {
       const k = segEnd[j];
       const cost = segs[k].cost;
+      normalPrev = Float64Array.from(prev);
       for (let u = 0; u <= U; u++) {
         const v = pre[u] - cost;
         if (v > prev[u]) { prev[u] = v; skipFlag[k][u] = 1; }
@@ -249,10 +257,15 @@ function* viterbi({ cumE, cumG, cumG0 = null, T, chordOf, N, stride, lo, hi, dmi
   }
   if (tailCost) {
     // the sheet may go on after the end of the audio: the last events are skipped, at a cost each
+    // (only if the audio really ends: what is left after the last event is much shorter than the skipped events)
     let acc = 0;
+    let exp = 0;
     let bestTail = bv;
     for (let j = N - 2; j >= 0; j--) {
       acc += tailCost[j + 1];
+      exp += expected[j + 1];
+      const left = T - endAt[j] * stride;
+      if (left >= TAIL_LEFT_FRAC * exp) continue;
       const v = endScore[j] - acc;
       if (v > bestTail + 1e-9) { bestTail = v; lastEvent = j; bu = endAt[j]; }
     }

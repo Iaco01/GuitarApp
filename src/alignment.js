@@ -7,7 +7,7 @@ export const ALIGNMENT_VERSION = 1;
 export const CONF_GREEN = 0.75;
 export const CONF_YELLOW = 0.5;
 // without a stable beat the colour is yellow at most (the engine caps the confidence of those changes at 0.55)
-export const CONF_YELLOW_FREE = 0.4;
+export const CONF_YELLOW_FREE = 0.35;
 const MIN_GAP_SEC = 0.05;
 // music not in the sheet shorter than this (a bar of passage the sheet does not write) is not a gap: the previous chord
 // simply lasts longer

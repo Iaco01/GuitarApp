@@ -149,7 +149,9 @@ export function computeFeatures(x, opts = {}) {
 }
 
 // Same as computeFeatures, as a generator that yields every few tens of milliseconds of work.
-export function* computeFeaturesSteps(x, { chromaHop = 1024, onProgress = null } = {}) {
+// With `inPlace` the level normalisation is done on `x` itself (the caller does not need the samples any more):
+// a 9 minute song is 22 MB per copy.
+export function* computeFeaturesSteps(x, { chromaHop = 1024, onProgress = null, inPlace = false } = {}) {
   const sr = FEATURE_RATE;
   // level normalisation: rms 0.1
   const CHUNK = 1 << 19; // yield now and then: a 9 minute song is 5.6 million samples
@@ -160,7 +162,7 @@ export function* computeFeaturesSteps(x, { chromaHop = 1024, onProgress = null }
   }
   const rms = Math.sqrt(ss / Math.max(1, x.length));
   const g = rms > 1e-9 ? 0.1 / rms : 1;
-  const xn = new Float32Array(x.length);
+  const xn = inPlace ? x : new Float32Array(x.length);
   for (let i = 0; i < x.length; i++) {
     xn[i] = x[i] * g;
     if ((i & (CHUNK - 1)) === CHUNK - 1) yield;

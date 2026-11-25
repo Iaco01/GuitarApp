@@ -17,17 +17,18 @@ function decodeWith(ctx, bytes) {
 
 // Mono mix of a decoded buffer, in slices so the page keeps drawing (a 9 minute stereo song at 11 kHz is
 // 5.6 million samples per channel).
+// The first channel is mixed in place: the decoded buffer is dropped right after, no second array of that size.
 async function toMono(buffer, tick) {
   const n = buffer.numberOfChannels;
   if (n === 1) return buffer.getChannelData(0);
   const len = buffer.length;
-  const out = new Float32Array(len);
   const chans = [];
   for (let c = 0; c < n; c++) chans.push(buffer.getChannelData(c));
+  const out = chans[0];
   const STEP = 1 << 19;
   for (let a = 0; a < len; a += STEP) {
     const b = Math.min(len, a + STEP);
-    for (let c = 0; c < n; c++) {
+    for (let c = 1; c < n; c++) {
       const ch = chans[c];
       for (let i = a; i < b; i++) out[i] += ch[i];
     }
@@ -52,12 +53,12 @@ export function nextTask() {
 // (45 MB for a 9-minute stereo song instead of 200 MB at 48 kHz); if the browser refuses that rate the
 // default one is used and the samples are resampled here.
 export async function decodeForAnalysis(blob) {
-  const bytes = await blob.arrayBuffer();
+  // (decodeAudioData takes the bytes over: no copy is kept for the fallback, the file is read again if it is needed)
   let buffer = null;
   const OAC = globalThis.OfflineAudioContext || globalThis.webkitOfflineAudioContext;
   if (OAC) {
     try {
-      buffer = await decodeWith(new OAC(1, 1, FEATURE_RATE), bytes.slice(0));
+      buffer = await decodeWith(new OAC(1, 1, FEATURE_RATE), await blob.arrayBuffer());
     } catch {
       buffer = null;
     }
@@ -68,14 +69,16 @@ export async function decodeForAnalysis(blob) {
     if (!AC) throw new Error('no-audio-context');
     ctx = new AC();
     try {
-      buffer = await decodeWith(ctx, bytes);
+      buffer = await decodeWith(ctx, await blob.arrayBuffer());
     } finally {
       try { ctx.close(); } catch { /* ignore */ }
     }
   }
   const mono = await toMono(buffer, nextTask);
   const rate = buffer.sampleRate;
-  return { samples: rate === FEATURE_RATE ? mono : resampleMono(mono, rate, FEATURE_RATE), sampleRate: FEATURE_RATE, durationSec: buffer.duration };
+  const durationSec = buffer.duration;
+  buffer = null; // the decoded stereo audio is no longer needed
+  return { samples: rate === FEATURE_RATE ? mono : resampleMono(mono, rate, FEATURE_RATE), sampleRate: FEATURE_RATE, durationSec };
 }
 
 // Runs decoding and analysis. onProgress(fraction, label). shouldCancel() -> true stops it (the promise
@@ -99,13 +102,17 @@ export async function runAutoSync({ song, blob, onProgress = () => {}, shouldCan
   let lastYield = performance.now();
   let maxSlice = 0;
   let yields = 0;
+  const audioSec = dec.durationSec;
+  const nSamples = dec.samples.length;
   const gen = analyseAndAlignSteps({
     samples: dec.samples,
     sampleRate: dec.sampleRate,
     song,
+    opts: { ownsSamples: true },
     now: () => performance.now(),
     onProgress: (f) => onProgress(0.1 + 0.9 * f, 'Analizzo l’audio…'),
   });
+  dec.samples = null; // the analysis releases the audio as soon as the features are computed
   const result = await runStepsAsync(gen, {
     sliceMs,
     shouldCancel,
@@ -123,5 +130,5 @@ export async function runAutoSync({ song, blob, onProgress = () => {}, shouldCan
     throw e;
   }
   const alignment = makeAlignment(result, song);
-  return { alignment, result, stats: { decodeMs: Math.round(decodeMs), analyseMs: Math.round(totalMs - decodeMs), totalMs: Math.round(totalMs), maxSliceMs: Math.round(maxSlice), yields, audioSec: dec.durationSec, samples: dec.samples.length } };
+  return { alignment, result, stats: { decodeMs: Math.round(decodeMs), analyseMs: Math.round(totalMs - decodeMs), totalMs: Math.round(totalMs), maxSliceMs: Math.round(maxSlice), yields, audioSec, samples: nSamples } };
 }
