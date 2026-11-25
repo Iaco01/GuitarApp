@@ -197,15 +197,17 @@ h1, h2, h3, p, ul, ol, dl, dd { margin: 0; }
 .pp-dot.on { background: var(--fg); border-color: var(--fg); }
 .pp-dot.acc.on { background: var(--accent); border-color: var(--accent); }
 .pp-bpm { flex: none; font: 700 14px var(--ui); white-space: nowrap; background: none; border: 0; color: var(--fg); min-height: 40px; padding: 0 3px; cursor: pointer; }
+.pp-note { display: inline-block; margin-right: -0.3em; }
 .pp-bpmbox { display: flex; align-items: center; flex: none; }
-.playpanel .btn.pp-bpm-step { min-width: 34px; width: 34px; padding: 0; font-size: 20px; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+.playpanel .btn.pp-bpm-step { min-width: 44px; width: 44px; min-height: 44px; padding: 0; font-size: 20px; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
 .pp-scope[hidden] { display: none; }
 .playpanel .btn.pp-scope { flex: none; min-width: 0; padding: 0 6px; font-size: 12px; }
 .pp-bpmedit { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .pp-bpmedit[hidden], .pp-bpmnote[hidden] { display: none; }
 .pp-bpmnote .btn { min-height: 32px !important; }
-.pp-pat { flex: 1 1 0; min-width: 0; display: flex; gap: 1px; overflow: hidden; }
-.pp-cell { flex: 1 1 0; min-width: 6px; max-width: 14px; text-align: center; font: 700 11px var(--mono); color: var(--muted); border-radius: 3px; }
+.pp-pat { display: flex; gap: 2px; width: 100%; min-width: 0; }
+.pp-pat[hidden], .playpanel.pp-norhythm .pp-pat { display: none; }
+.pp-cell { flex: 1 1 0; min-width: 14px; max-width: 28px; height: 16px; line-height: 16px; text-align: center; font: 700 14px var(--mono); color: var(--muted); border-radius: 4px; }
 .pp-cell.on { color: var(--fg); background: color-mix(in srgb, var(--accent) 20%, transparent); }
 .pp-cell.now { background: var(--accent); color: var(--accent-fg); }
 .pp-spacer { flex: 1 1 0; }

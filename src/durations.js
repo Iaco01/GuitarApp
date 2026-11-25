@@ -99,9 +99,11 @@ function estimateFlow(flow, { perBar, grid, minBeats, avg }) {
   const items = flow.items;
   const n = items.length;
   if (n === 0) return [];
-  // the first chord also covers the syllables sung before it
-  const pos = items.map((it, i) => (i === 0 ? 0 : it.pos));
-  const total = Math.max(flow.end, pos[n - 1] + 1e-6, 1e-6);
+  // the syllables sung before the first chord are a pick-up (levare): they do not count; the first chord
+  // starts on the downbeat of the section
+  const p0 = items[0].pos;
+  const pos = items.map((it) => it.pos - p0);
+  const total = Math.max(flow.end - p0, pos[n - 1] + 1e-6, 1e-6);
   const r = (avg * n) / total;
   // 3+ chords within FAST_SPAN syllables: quick changes, fine grid
   const fast = pos.map(() => false);
@@ -111,10 +113,10 @@ function estimateFlow(flow, { perBar, grid, minBeats, avg }) {
   const bounds = [0];
   for (let k = 1; k < n; k++) {
     const g = fast[k - 1] && fast[k] ? 1 : grid;
-    const min = fast[k - 1] ? 1 : minBeats;
+    const min = k === 1 ? Math.max(2, minBeats) : fast[k - 1] ? 1 : minBeats; // first chord: at least 2 beats
     bounds.push(Math.max(bounds[k - 1] + min, snap(pos[k] * r, g)));
   }
-  const lastMin = fast[n - 1] ? 1 : minBeats;
+  const lastMin = n === 1 ? Math.max(2, minBeats) : fast[n - 1] ? 1 : minBeats;
   let end = Math.round((avg * n) / perBar) * perBar;
   if (end < bounds[n - 1] + lastMin) end = Math.ceil((bounds[n - 1] + lastMin) / perBar) * perBar;
   bounds.push(end);

@@ -151,3 +151,27 @@ test('real file: the whole song is estimated in under 20 ms', real, () => {
   estimateSongDurations(song);
   assert.ok(performance.now() - t < 20, `${performance.now() - t} ms`);
 });
+
+test('estimate: syllables before the first chord are a pick-up and do not count', () => {
+  // chords on syllables 4, 8, 12 of 16: same shape as 0, 4, 8 of 12
+  const a = estimateSectionDurations(sec([lyricLine(16, [4, 8, 12])]), {});
+  const b = estimateSectionDurations(sec([lyricLine(12, [0, 4, 8])]), {});
+  assert.deepEqual(a, b);
+  assert.ok(a[0] >= 2);
+});
+
+test('estimate: the first chord of a section lasts at least 2 beats (quick changes included)', () => {
+  const d = estimateSectionDurations(sec([lyricLine(10, [0, 1, 2, 6])]), {});
+  assert.ok(d[0] >= 2, String(d));
+  assert.ok(estimateSectionDurations(sec([lyricLine(3, [0])]), {})[0] >= 2);
+});
+
+const REAL = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'local', 'american-pie.mht');
+test('real file: no section starts with a chord shorter than 2 beats', { skip: existsSync(REAL) ? false : 'file reale assente' }, () => {
+  const s = parseSongFromMht(readFileSync(REAL, 'utf-8'));
+  const short = s.sections.filter((sec2) => {
+    const first = sec2.lines.flatMap((l) => l.chords)[0];
+    return first && first.beats < 2;
+  });
+  assert.equal(short.length, 0);
+});

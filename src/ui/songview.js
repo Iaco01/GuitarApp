@@ -518,7 +518,8 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
   }
 
   function paintBpmNote() {
-    if (!bpmUndo || player !== audioPlayer) {
+    // the note (and its undo) shows with an audio, or without one when the 30-300 limit was hit
+    if (!bpmUndo || (player !== audioPlayer && !bpmUndo.limited)) {
       panel.setBpmNote('');
       return;
     }
@@ -528,7 +529,7 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
       panel.setBpmNote('');
       return;
     }
-    panel.setBpmNote(`${d > 0 ? '+' : '−'}${formatBpm(Math.abs(d))} BPM ${song.view.bpmScope === 'section' ? 'su questa sezione' : 'su tutto il brano'}`);
+    panel.setBpmNote(`${d > 0 ? '+' : '−'}${formatBpm(Math.abs(d))} BPM ${song.view.bpmScope === 'section' ? 'su questa sezione' : 'su tutto il brano'}${bpmUndo.limited ? ' (limite 30–300: i rapporti restano)' : ''}`);
   }
 
   function refreshAfterBpm() {
@@ -554,6 +555,7 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
     if (!bpmUndo) bpmUndo = { snap: snapshotBpms(song), index, base: effectiveSectionBpms(song)[index], key: '' };
     else if (scope === 'all') restoreBpms(song, bpmUndo.snap);
     applyBpmChange(song, index, newValue, scope);
+    bpmUndo.limited = scope === 'all' && Math.abs(effectiveSectionBpms(song)[index] - Math.round(newValue * 10) / 10) > 0.05;
     bpmUndo.key = tempoKey();
     refreshAfterBpm();
   }
@@ -765,6 +767,12 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
     diagramsOn: typeof song.view.panelDiagrams === 'boolean' ? song.view.panelDiagrams : window.innerHeight >= LOW_SCREEN_PX,
     onDiagrams: (on) => {
       song.view.panelDiagrams = on;
+      persist();
+    },
+    // short screens: the rhythm row is off unless the user turned it on
+    rhythmOn: typeof song.view.panelRhythm === 'boolean' ? song.view.panelRhythm : window.innerHeight >= LOW_SCREEN_PX,
+    onRhythm: (on) => {
+      song.view.panelRhythm = on;
       persist();
     },
     onNoticeClosed: () => {

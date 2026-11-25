@@ -82,3 +82,15 @@ test('player: setTimeline while playing keeps the current event and beat fractio
   assert.equal(b.state, 'playing');
   p.destroy();
 });
+
+test('applyBpmChange "all": near the 300 limit the factor is limited, not the single sections', () => {
+  const s = song();
+  const before = effectiveSectionBpms(s);
+  applyBpmChange(s, 0, 299, 'all');
+  const after = effectiveSectionBpms(s);
+  assert.ok(after.every((v) => v <= 300));
+  assert.ok(Math.abs(after[2] - 300) < 0.06);
+  // ratios between sections kept (within rounding)
+  assert.ok(Math.abs(after[1] / after[0] - before[1] / before[0]) < 0.003);
+  assert.ok(Math.abs(after[2] / after[0] - before[2] / before[0]) < 0.003);
+});

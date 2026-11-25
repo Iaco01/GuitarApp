@@ -400,13 +400,25 @@ export function restoreBpms(song, snap) {
   });
 }
 
+// Tempo the section `index` can take when the whole song is scaled: the factor is limited (not the single
+// sections) so that no section leaves 30-300 and the ratios between sections survive.
+export function limitedBpmTarget(eff, index, newBpm) {
+  const want = clampBpm(newBpm);
+  let k = want / eff[index];
+  let kMin = 0;
+  let kMax = Infinity;
+  for (const v of eff) { kMin = Math.max(kMin, BPM_SCALE_MIN / v); kMax = Math.min(kMax, BPM_SCALE_MAX / v); }
+  if (kMin <= kMax) k = Math.min(kMax, Math.max(kMin, k));
+  return eff[index] * k;
+}
+
 // Sets the tempo of section `index` to `newBpm`. scope 'all': every section is scaled by the same
 // factor newBpm / (effective tempo of that section), so the ratios between sections stay; 'section':
 // only that one. Values are rounded to 0.1 and kept in 30-300. Returns the factor applied.
 export function applyBpmChange(song, index, newBpm, scope = 'all') {
   const eff = effectiveSectionBpms(song);
-  const target = clampBpm(newBpm);
   if (!song.sections[index]) return 1;
+  const target = scope === 'section' ? clampBpm(newBpm) : limitedBpmTarget(eff, index, newBpm);
   const k = target / eff[index];
   const setSec = (i, v) => {
     song.sections[i].bpm = roundTenth(clampBpm(v));

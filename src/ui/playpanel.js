@@ -8,7 +8,7 @@ const SPEED_MIN = 50;
 const SPEED_MAX = 100;
 
 // `diagramSvg(label)` (optional) returns the small SVG of a chord shown next to its name.
-export function createPlayPanel(song, { onLoopExit = null, onPlayPause, onStop, onSpeed, onMetronome, onTap, speedPct = 100, metronomeOn = true, diagramSvg = null, diagramsOn = true, onDiagrams = null, onNoticeClosed = null, onBpmStep = null, onBpmSet = null, onScope = null, onBpmUndo = null, bpmScope = 'all' }) {
+export function createPlayPanel(song, { onLoopExit = null, onPlayPause, onStop, onSpeed, onMetronome, onTap, speedPct = 100, metronomeOn = true, diagramSvg = null, diagramsOn = true, onDiagrams = null, onNoticeClosed = null, onBpmStep = null, onBpmSet = null, onScope = null, onBpmUndo = null, bpmScope = 'all', rhythmOn = true, onRhythm = null }) {
   const perBar = (song.timeSignature && song.timeSignature[0]) || 4;
   let speed = speedPct;
   let metro = metronomeOn;
@@ -147,7 +147,21 @@ export function createPlayPanel(song, { onLoopExit = null, onPlayPause, onStop, 
     clickIcon.textContent = metro ? '🔔' : '🔕';
     clickIcon.setAttribute('aria-label', metro ? 'Clic acceso: tocca per spegnere' : 'Clic spento: tocca per accendere');
   }
-  const more = domEl('div', { class: 'pp-more', id: 'pp-more', hidden: true }, speedBox, metroBtn, tapBtn, dgBtn, stopBtn);
+  let rhOn = rhythmOn;
+  const rhBtn = domEl('button', {
+    type: 'button', class: 'btn', id: 'btn-pp-rhythm', 'aria-pressed': String(rhOn),
+    onclick: () => {
+      rhOn = !rhOn;
+      paintRhythm();
+      if (onRhythm) onRhythm(rhOn);
+    },
+  });
+  function paintRhythm() {
+    rhBtn.setAttribute('aria-pressed', String(rhOn));
+    rhBtn.textContent = rhOn ? 'Ritmo: sì' : 'Ritmo: no';
+    el.classList.toggle('pp-norhythm', !rhOn);
+  }
+  const more = domEl('div', { class: 'pp-more', id: 'pp-more', hidden: true }, speedBox, metroBtn, tapBtn, dgBtn, rhBtn, stopBtn);
   const moreBtn = domEl('button', {
     type: 'button', class: 'btn pp-more-btn', id: 'btn-more', 'aria-label': 'Altri comandi', 'aria-expanded': 'false', 'aria-controls': 'pp-more',
     onclick: () => {
@@ -163,12 +177,14 @@ export function createPlayPanel(song, { onLoopExit = null, onPlayPause, onStop, 
     notice,
     bpmNote,
     domEl('div', { class: 'pp-row1' }, cur, next, playBtn),
-    domEl('div', { class: 'pp-row2' }, dotsEl, bpmBox, scopeBtn, patEl, loopBadge, clickIcon, moreBtn),
+    domEl('div', { class: 'pp-row2' }, dotsEl, bpmBox, scopeBtn, domEl('span', { class: 'pp-spacer' }), loopBadge, clickIcon, moreBtn),
+    patEl,
     bpmEdit,
     more);
 
   paintScope();
   paintDg();
+  paintRhythm();
   paintClick();
 
   function setDiagram(holder, label) {
@@ -219,7 +235,12 @@ export function createPlayPanel(song, { onLoopExit = null, onPlayPause, onStop, 
       dots.forEach((dot, i) => dot.classList.toggle('on', d.beatInBar === i));
       // effective tempo (scaled between anchors); "≈" when it differs from the saved one
       const approx = Number.isFinite(d.savedBpm) && Math.abs(d.bpm - d.savedBpm) > 0.2;
-      bpmEl.textContent = approx ? `♩ ≈ ${formatBpm(Math.round(d.bpm * 10) / 10)}` : `♩ = ${formatBpm(d.bpm)}`;
+      const bpmText = approx ? `≈${formatBpm(Math.round(d.bpm * 10) / 10)}` : `=${formatBpm(d.bpm)}`;
+      if (bpmEl.dataset.t !== bpmText) {
+        bpmEl.dataset.t = bpmText;
+        // the note glyph has a wide side bearing in most fonts: it sits in its own tight span
+        bpmEl.replaceChildren(domEl('span', { class: 'pp-note' }, '♩'), bpmText);
+      }
       bpmEl.dataset.v = formatBpm(Number.isFinite(d.savedBpm) ? d.savedBpm : d.bpm);
       const key = (d.strum ? d.strum.beats.length : 'none') + ':' + d.strumId;
       if (key !== lastKey) {

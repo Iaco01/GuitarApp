@@ -250,7 +250,7 @@ async function run(label, profile) {
     const clickIcon = await page.$eval('#btn-click-icon', (b) => ({ vis: b.getBoundingClientRect().width > 0 && !b.closest('[hidden]'), t: b.textContent, pressed: b.getAttribute('aria-pressed') }));
     rec('R7 click icon visible without opening "⋯"', clickIcon.vis && (clickIcon.t === '🔕' || clickIcon.t === '🔔'), JSON.stringify(clickIcon));
     const bpmTxt = await page.innerText('#pp-bpm');
-    rec('R7 effective tempo shown with "≈" (sheet 100, the stretch Intro+Strofa is scaled as a whole)', /^♩ ≈ 9[5-8]/.test(bpmTxt), bpmTxt);
+    rec('R7 effective tempo shown with "≈" (sheet 100, the stretch Intro+Strofa is scaled as a whole)', /^♩ ?≈ ?9[5-8]/.test(bpmTxt), bpmTxt);
     await shot(page, 'panel-loop');
     await page.click('#btn-click-icon');
     rec('R7 tap on the click icon turns the click on', (await page.$eval('#btn-click-icon', (b) => b.textContent)) === '🔔' && (await page.$eval('#btn-metro', (b) => b.getAttribute('aria-pressed'))) === 'true');
