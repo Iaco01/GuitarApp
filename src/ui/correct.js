@@ -156,6 +156,7 @@ export function openCorrection({ song, sectionIndex, name, getPlayer, timelineWi
     if (cur === lastCur) return;
     lastCur = cur;
     chipEls.forEach((c, k) => { c.classList.toggle('now', k === cur); c.classList.toggle('tapped', previewing); });
+    if (chipEls[cur] && chipEls[cur].scrollIntoView) chipEls[cur].scrollIntoView({ block: 'nearest' });
   });
 
   function close(saved) {

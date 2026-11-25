@@ -105,3 +105,53 @@ Banco sintetico (5 semi, entro 250 ms su tutti): 97,3–98,2%, praticamente ugua
 ### Limiti
 
 Senza una verità vera sul brano reale non si distingue +1,3 punti da rumore. Per passare davvero da 58% a 75% servirebbe una verità annotata a mano su alcune sezioni (anche solo 20 cambi), non altre ottimizzazioni alla cieca sul controllo.
+
+## Fase B — Integrazione nell'app
+
+### Cosa è stato fatto
+
+1. **Correzioni dal round 6** (commit a parte). Ritmo del pannello su una riga propria a tutta larghezza (16 celle da 19–21 px a 360–390 px di schermo, frecce da 14 px; la cella corrente è accesa in ognuno dei 360 fotogrammi campionati in 6 s su 360, SE e 13; il pannello cresce di 24 px rispetto al round 6, misurato 112,5→136,5 a 360, 99→123 a SE e 13; sotto i 700 px la riga è spenta di default e si accende da "⋯ → Ritmo"). Clamp dei BPM sul *fattore* (i rapporti tra le sezioni restano) con nota e "Annulla" anche senza audio quando il limite scatta. Levare del primo accordo: le sillabe prima del primo accordo non contano e il primo accordo dura almeno 2 battiti (sul file reale 0 sezioni su 12 con primo accordo sotto 2 battiti; test a conteggi). "♩=62" senza spazio, − / + da 44×44 px. Script: `test/e2e/round7-panel.cjs`.
+2. **Motore a pezzi**: `computeFeaturesSteps`, `alignEventsSteps`, `analyseAndAlignSteps` (generatori) e `src/analysis/steps.js` (`runSteps`, `runStepsAsync` con cessione ogni 40 ms, annullamento e progresso). Risultati identici alla versione sincrona (test `deepEqual`; numeri del banco e del reale invariati). Nella build entrano `src/analysis/*` (7 moduli), `src/alignment.js` e 3 moduli UI.
+3. **Allineamento nel brano** (`src/alignment.js`, puro): `song.audio.alignment`, stati dei colori, timeline con allineamento (`buildTimeline(..., { alignment })`, solo con l'audio), ancore delle sezioni sopra l'allineamento, spostamento globale ±50/100 ms, durate e BPM misurati portati nel brano, esportazione delle sezioni verificate. Compatibile con export/import della libreria.
+4. **UI** (`src/ui/audiodecode.js`, `autosync.js`, `correct.js`, `syncscreen.js`): "Sincronizza automaticamente" (grande), barra di avanzamento e "Annulla"; riepilogo per sezione con colore + testo ("sicura / da controllare / incerta / verificata ✓"), BPM o "tempo libero", orario, "Ascolta" e "Correggi a orecchio" per sezione; "Ascolta e controlla" con accordo corrente e sezione evidenziati; trasposizione trovata con "Trasponi il foglio"; "Accetta", "Rifai", "Scarta"; la sincronizzazione manuale resta in un pannello "ripiego".
+5. **Correggi a orecchio**: audio da 2 s prima della sezione, grande pulsante "Cambio!" (28% dell'altezza, `pointerdown`), contatore e accordi della sezione che si riempiono, ritardo di reazione regolabile (default 0 ms, passi da 10 ms), anteprima con evidenziazione, "Salva" → sezione verde scuro. Il nucleo puro è `tapsToStarts` in `src/taprecord.js`.
+6. **Verità esportata**: pulsante "Esporta correzioni (N)" → JSON con soli tempi e nomi di accordi; `autosync-real.mjs --truth file.json` misura l'errore vero entro 100/250/500 ms e il mediano.
+
+### Test
+
+`npm test` 197/197 (nuovi: `test/alignment.test.js` 9 test, passi/annullo/progresso del motore, levare e primo accordo, limite BPM). E2E senza regressioni: `round6.cjs` 26 PASS, `round5.cjs all` 67 PASS (ALL PASS), `round4.cjs` 45 PASS (ALL PASSED), `round7-panel.cjs` 10 PASS, `round7.cjs flow` ALL PASS su 360, SE e 13, `round7.cjs perf` PASS (CPU ×4). Ho dovuto aggiornare due asserzioni, non per regressioni: round5 R7 accetta "♩≈9x" senza spazio e round6 P5 osserva i cambi di accordo su 16 s invece di 9 (con la nuova stima il primo accordo del Verse 1 dura di più e in 9 s ne cadeva uno solo).
+
+### Tempi misurati (mp3 reale 513,6 s, 328 eventi, Chromium headless del container)
+
+| | decodifica | analisi | totale | fetta più lunga senza cedere il controllo |
+|---|---|---|---|---|
+| CPU normale | 1,6 s | 3,6 s | 5,2 s | 0,31 s |
+| **CPU ×4** (`Emulation.setCPUThrottlingRate`) | 1,8 s | 15,1 s | **16,9 s** | 1,0 s |
+
+Obiettivo < 20 s rispettato ma con poco margine (i telefoni vecchi fanno più di ×4). La decodifica è nativa e non rallenta con la throttling; l'analisi è JS puro. Memoria: la decodifica a 11025 Hz tiene circa 45 MB (stereo) + 22 MB mono. Dimensione della build: 349,7 KB (prima 260,9 KB), 41 moduli.
+
+### Sul brano reale nel browser
+
+Flusso completo verificato a 360×740 con tocco: carica .mht e mp3 → "Sincronizza automaticamente" (barra al 14–19% dopo 1,5 s) → 12 sezioni: giallo, giallo, giallo, verde, giallo, verde, giallo, verde, verde, verde, rosso, rosso (5 sicure, 5 da controllare, 2 incerte) → "Ascolta e controlla" riproduce e mostra sezione e accordo correnti → "Correggi a orecchio" su Verse 1 (35 cambi) con tocchi simulati agli istanti voluti: errore massimo 21 ms rispetto ai tempi che volevo, anteprima con un accordo evidenziato alla volta, "Salva" → sezione verificata (verde scuro), conteggio "1 verificate" → "Esporta correzioni" scarica un JSON con 1 sezione, 35 nomi di accordi e 35 tempi, nessun testo → in vista brano il Play usa la timeline allineata, l'accordo evidenziato c'è in tutti i fotogrammi, e l'allineamento con la sezione verificata sopravvive al ricaricamento. Lo stesso flusso passa anche su iPhone SE (375×667) e iPhone 13 (decodifica 2,4 s, analisi 4,2–4,8 s a CPU normale). Durante la decodifica (nativa, senza avanzamento) la barra è indeterminata, poi mostra la percentuale. Nessun errore di pagina. Screenshot in `test-artifacts/round-7/` (non versionati: mostrano il testo del brano).
+
+Attenzione: i "tocchi" del test sono simulati con il clock dell'audio (seek + `pointerdown`), non con un dito. Non ho potuto verificare a orecchio quanto siano giuste le sezioni verdi: il colore misura la fiducia del motore (controllo locale reale ancora al 57–59%), non la correttezza.
+
+### Limiti noti
+
+- Il motore sul brano reale resta impreciso (controllo locale ~57%); il colore verde non garantisce nulla. Solo l'export delle correzioni (`--truth`) permetterà di misurare l'errore vero: serve che l'utente corregga almeno qualche sezione a orecchio.
+- Il tempo su un telefono vecchio può superare i 20 s; l'analisi non si può mettere in un Worker senza cambiare la build a file unico. Su iOS Safari la decodifica a 11025 Hz o la memoria potrebbero fallire: c'è il ripiego su `AudioContext` normale e un messaggio chiaro (non verificato su Safari).
+- Se si modificano gli accordi del foglio dopo la sincronizzazione, l'allineamento viene ignorato (avviso nella schermata).
+- "Rifai" perde le sezioni verificate (chiede conferma).
+- I BPM −/+ del pannello non modificano l'allineamento (solo i BPM salvati).
+- Il tocco a orecchio richiede esattamente un tocco per accordo, primo compreso; non c'è correzione di un singolo accordo.
+- Le ancore ⚓ di sezione prevalgono sempre sull'allineamento della loro sezione, indipendentemente da quando sono state fissate.
+- Non provato su dispositivo reale (solo CDP e Chromium del container): latenza reale di tocco e di uscita audio, Safari.
+
+### Come usarla sul telefono
+
+1. Importa il `.mht`, apri il brano, «Aggiungi audio» (o «Sincronizza audio») e scegli l'mp3.
+2. Tocca «Sincronizza automaticamente» e lascia lo schermo acceso: circa 20–30 s su un telefono recente. Puoi annullare.
+3. Guarda il riepilogo: verde = sicura, giallo = da controllare, rosso = incerta. Premi «Ascolta e controlla» e senti se l'accordo evidenziato cambia insieme alla musica. Se la registrazione è un tono sopra o sotto il foglio, tocca «Trasponi il foglio».
+4. Per ogni sezione che non va: «Correggi a orecchio». L'audio riparte 2 secondi prima; tocca «Cambio!» a ogni cambio d'accordo (il primo compreso, uno per accordo, anche per le pause). Se tocchi sempre un po' in ritardo, regola «Ritardo di reazione». «Anteprima: ascolta», poi «Salva»: la sezione diventa verde scuro.
+5. «Accetta» quando sei soddisfatto. Poi suoni dalla vista del brano con Play: l'evidenziazione segue l'audio.
+6. «Esporta correzioni» crea un file `.json` con le sezioni verificate (solo tempi e nomi di accordi): passalo al computer per misurare e migliorare il motore. Se l'automatico non funziona, il pannello «Sincronizzazione manuale (ripiego)» ha gli strumenti di sempre.

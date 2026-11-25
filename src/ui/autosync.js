@@ -91,8 +91,10 @@ export function createAutoSyncPanel({ song, getBlob, getPlayer, timelineWith, pe
   }
 
   function paintProgress() {
-    if (progBar) progBar.value = progress;
-    if (progText) progText.textContent = `${progressLabel} ${Math.round(progress * 100)}%`;
+    // while decoding (native, no way to know how far it is) the bar is indeterminate
+    const known = progress >= 0.1;
+    if (progBar) { if (known) progBar.value = progress; else progBar.removeAttribute('value'); }
+    if (progText) progText.textContent = known ? `${progressLabel} ${Math.round(progress * 100)}%` : progressLabel;
   }
 
   function listenFrom(sec, click = false) {

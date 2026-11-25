@@ -67,10 +67,11 @@ async function flow(label, profile) {
   const t0 = Date.now();
   await page.click('#as-start');
   await page.waitForSelector('#as-progress');
-  await sleep(1500);
+  await page.waitForFunction(() => { const p = document.querySelector('#as-progress'); return p && p.value > 0.1; }, null, { timeout: 30000 });
+  await sleep(500);
   const mid = await page.evaluate(() => ({ v: document.querySelector('#as-progress').value, t: document.querySelector('#as-prog-text').textContent }));
   await shot(page, '2-progress');
-  rec('F1 progress bar visible and moving while the analysis runs', mid.v > 0 && mid.v < 1 && /%/.test(mid.t), JSON.stringify(mid));
+  rec('F1 progress bar visible and moving while the analysis runs', mid.v > 0.1 && mid.v < 1 && /%/.test(mid.t), JSON.stringify(mid));
   await page.waitForSelector('#as-rows', { timeout: 120000 });
   const wall = Date.now() - t0;
   const stats = await page.evaluate(() => window.__gappAutosync);

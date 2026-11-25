@@ -11,6 +11,7 @@ Web app statica per telefono: importa una pagina Ultimate Guitar salvata come fi
 - **Trasposizione** ±12 semitoni, **capotasto** 0–12 con suggerimento di 3 opzioni, diagrammi di tutti gli accordi (anche forme del capotasto).
 - **Libreria**: ricerca, ordinamento, esportazione e importazione JSON (dell'audio si esportano solo i metadati), badge "durate" e "audio" (o "audio mancante" se il file non è nel browser).
 - **Audio sincronizzato**: carichi un file audio (resta nel telefono, in IndexedDB), fissi l'inizio con «Primo accordo!», segni facoltativamente l'inizio delle sezioni (⚓ ancore, regolabili a ±10/±50 ms) e la fine del brano; l'app scala i tempi tra due ancore e suggerisce di correggere i BPM. Calibrazione della latenza per cuffie Bluetooth.
+- **Sincronizzazione automatica (round 7)**: con l'audio caricato, «Sincronizza automaticamente» decodifica l'mp3 sul telefono e allinea la sequenza di accordi del foglio sull'audio (inizio, tempo, cambio di ogni accordo, anche a tempo libero). Riepilogo per sezione con colore di fiducia (verde / giallo / rosso), «Ascolta e controlla», trasposizione trovata, «Correggi a orecchio» (tocchi «Cambio!» a ogni cambio mentre l'audio gira: la sezione diventa verificata), esportazione delle sezioni verificate in JSON (solo tempi e nomi degli accordi) e «Usa durate e BPM misurati» per studiare col metronomo. La sincronizzazione manuale resta come ripiego.
 
 ## Build
 
@@ -47,6 +48,10 @@ node test/e2e/round4-tester-anchors.cjs             # ancore nelle intestazioni
 node test/e2e/round5.cjs             # round 5: sincronizzazione, pannello, libreria, ancore
 node test/e2e/round5-text.cjs        # spaziatura del testo sotto gli accordi (file reale)
 node test/e2e/round6.cjs             # round 6: durate stimate, − / + del BPM in play (file reale e audio sintetico)
+node test/e2e/round7-panel.cjs       # round 7: riga del ritmo nel pannello (a ogni frame, altezza)
+node test/e2e/round7.cjs [flow|perf|all] [360|SE|13]   # round 7: sincronizzazione automatica sull'mp3 reale, correzione a orecchio, CPU ×4
+node test/e2e/autosync-real.mjs [--truth correzioni.json]   # motore sul brano reale (ffmpeg); con le correzioni esportate dall'app dà l'errore vero
+node test/e2e/autosync-bench.mjs     # banco sintetico lungo (verità nota)
 ```
 
 Screenshot e numeri vanno in `test-artifacts/` (ignorato da git).
@@ -58,6 +63,7 @@ L'app è pubblicata su **https://iaco01.github.io/GuitarApp/** tramite GitHub Pa
 1. Apri https://iaco01.github.io/GuitarApp/ nel browser del telefono (Chrome su Android, Safari su iOS). Funziona offline dopo il primo caricamento se il browser la tiene in cache; i dati (brani, audio) restano nel browser: usa «Esporta libreria» per un backup.
 2. Aggiungi alla schermata Home dal menu del browser per averla a schermo intero.
 3. Importa il file `.mht` con «Importa .mht»; per l'audio apri il brano e tocca «Aggiungi audio».
+4. Sincronizzazione automatica: nella schermata «Sincronizza audio» tocca «Sincronizza automaticamente» e tieni lo schermo acceso (circa 20–30 s su un telefono recente, decodifica compresa; barra di avanzamento e «Annulla»). Poi «Ascolta e controlla» e correggi le sezioni gialle o rosse con «Correggi a orecchio». Per esportare le tue correzioni (un file `.json` con solo tempi e nomi degli accordi) usa «Esporta correzioni».
 
 ## Come salvare una pagina Ultimate Guitar
 

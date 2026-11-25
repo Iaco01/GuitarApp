@@ -1,5 +1,7 @@
 // Automatic sync on the real song (local only: copyrighted files outside git).
-//   node test/e2e/autosync-real.mjs [path/to/song.mht] [path/to/song.mp3]
+//   node test/e2e/autosync-real.mjs [path/to/song.mht] [path/to/song.mp3] [--truth test/fixtures/local/truth.json]
+// --truth: the corrections exported by the app ("Esporta correzioni", verified sections: only times and chord
+// names); prints the real error of the engine on those sections (within 100/250/500 ms, median).
 // The mp3 is decoded with ffmpeg (tests only). Prints times, section names, chord names and
 // counts, never the text of the song.
 import { readFileSync, existsSync } from 'node:fs';
@@ -9,8 +11,12 @@ import { analyseAndAlign, songEvents } from '../../src/analysis/autosync.js';
 import { independentChroma, independentCheck } from './autosync-check.mjs';
 
 const DIR = '/home/user/guitarapp/test/fixtures/local/';
-const MHT = process.argv[2] || DIR + 'american-pie.mht';
-const MP3 = process.argv[3] || DIR + 'american-pie.mp3';
+const argv = process.argv.slice(2);
+const ti = argv.indexOf('--truth');
+const TRUTH = ti >= 0 ? argv[ti + 1] : null;
+const pos = argv.filter((a, i) => !(ti >= 0 && (i === ti || i === ti + 1)));
+const MHT = pos[0] || DIR + 'american-pie.mht';
+const MP3 = pos[1] || DIR + 'american-pie.mp3';
 if (!existsSync(MHT) || !existsSync(MP3)) {
   console.log('file reali assenti: niente da fare');
   process.exit(0);
@@ -77,3 +83,27 @@ res.sections.forEach((s, i) => {
   });
 });
 console.log(`vicino ai battiti (${nt} cambi, +-0,12 battiti): battito ${(100 * nb / nt).toFixed(0)}%  battito o mezzo battito ${(100 * nh / nt).toFixed(0)}%`);
+
+// ---- real error on the sections verified by ear (exported by the app)
+if (TRUTH) {
+  const t = JSON.parse(readFileSync(TRUTH, 'utf-8'));
+  const bySection = song.sections.map(() => []);
+  events.forEach((e, j) => bySection[e.section].push(j));
+  const errs = [];
+  const perSection = [];
+  for (const sec of t.sections) {
+    const idx = bySection[sec.index] || [];
+    if (idx.length !== sec.eventStartSec.length) { console.log(`verità: sezione ${sec.index + 1} ignorata (${sec.eventStartSec.length} tempi per ${idx.length} eventi)`); continue; }
+    if (sec.chords.some((n, k) => n !== events[idx[k]].name)) { console.log(`verità: sezione ${sec.index + 1} ignorata (accordi diversi dal foglio)`); continue; }
+    const e = idx.map((j, k) => Math.abs(res.eventStartSec[j] - sec.eventStartSec[k]));
+    errs.push(...e);
+    const within = (th) => (100 * e.filter((v) => v <= th).length) / e.length;
+    perSection.push(`${sec.index + 1} ${sec.name}: ${within(0.1).toFixed(0)}/${within(0.25).toFixed(0)}/${within(0.5).toFixed(0)}%`);
+  }
+  if (errs.length) {
+    const sorted = errs.slice().sort((a, b) => a - b);
+    const within = (th) => ((100 * errs.filter((v) => v <= th).length) / errs.length).toFixed(1);
+    console.log(`verità (${errs.length} cambi in ${perSection.length} sezioni): entro 100 ms ${within(0.1)}%, 250 ms ${within(0.25)}%, 500 ms ${within(0.5)}%; errore mediano ${(sorted[sorted.length >> 1] * 1000).toFixed(0)} ms`);
+    console.log('  per sezione (100/250/500 ms): ' + perSection.join('; '));
+  } else console.log('verità: nessuna sezione utilizzabile');
+}
