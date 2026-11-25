@@ -81,6 +81,14 @@ Nessun testo del brano nei file versionati. Nel report vanno solo tempi, nomi di
 
 **Fine fase A: commit e report intermedio** in `docs/reports/round-7-impl.md` (sezione "Fase A") con i numeri, prima di toccare la UI.
 
+## Correzioni dal round 6 (fai prima della Fase B)
+
+Da `docs/reports/round-6-test.md`:
+1. **Media — ritmo nel pannello illeggibile su tutti gli schermi**: 16 celle da 6 px in un riquadro di 18–48 px, e la cella corrente si vede solo 8 volte su 31. Il ritmo va su una **riga propria** del pannello, a tutta larghezza, con celle ≥ 14 px e frecce leggibili. La cella corrente deve essere sempre evidenziata durante il play: verificalo campionando a ogni frame. Su schermi bassi (< 700 px) la riga si può nascondere dal "⋯". L'altezza del pannello cresce al massimo di 24 px: misuralo.
+2. **Bassa — clamp a 300 BPM** che appiattisce i rapporti tra sezioni senza Annulla: se il fattore porterebbe una sezione fuori da 30–300, limita il **fattore** (non le singole sezioni) e avvisa. Annulla deve esserci anche senza audio.
+3. **Bassa — primo accordo di sezione corto** in 7 sezioni su 12, e sensibilità a una sillaba. Le sillabe prima del primo accordo di una sezione sono una levare: non contano nella durata. Il primo accordo di ogni sezione inizia sul battere e dura almeno 2 battiti. Test sul file reale: 0 primi accordi di sezione sotto i 2 battiti.
+4. **Cosmetica**: togli lo spazio tra ♩ e il numero; pulsanti − / + da almeno 44 px.
+
 ## Fase B0 — Migliorare l'allineamento sul brano reale (prima della UI)
 
 Dalla Fase A (`docs/reports/round-7-impl.md`):
