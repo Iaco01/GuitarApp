@@ -81,6 +81,27 @@ Nessun testo del brano nei file versionati. Nel report vanno solo tempi, nomi di
 
 **Fine fase A: commit e report intermedio** in `docs/reports/round-7-impl.md` (sezione "Fase A") con i numeri, prima di toccare la UI.
 
+## Fase B0 — Migliorare l'allineamento sul brano reale (prima della UI)
+
+Dalla Fase A (`docs/reports/round-7-impl.md`):
+- sul sintetico il 98% dei cambi cade entro 250 ms;
+- sul reale il controllo indipendente locale passa solo per il **57,3%** dei cambi. Le strofe con band piena (Verse 3–5) sono le peggiori (40–51%), mentre la verità sintetica sullo stesso controllo dà 93,5%;
+- l'allineamento è grosso modo giusto (spostando i cambi di ±0,9 s il controllo crolla all'8–10%), ma poco preciso;
+- solo il 41% dei cambi cade vicino a un battito.
+
+Prima della UI prova, misurando ogni modifica con `test/e2e/autosync-real.mjs` e `autosync-check.mjs` senza peggiorare il banco sintetico:
+1. **Aggancio ai battiti** nelle sezioni a tempo stabile: dopo Viterbi, sposta ogni cambio sul battito più vicino (o sul mezzo battito se più vicino ai dati), poi misura di nuovo il controllo locale e la percentuale vicino ai battiti.
+2. **Allineamento sincronizzato ai battiti** nei tratti stabili: un frame per battito invece di 10 fps. Riduce il rumore e impone che i cambi cadano sui battiti.
+3. **Croma più pulito con band piena**:
+   - pesa di più le frequenze 80–1000 Hz;
+   - sottrai una stima della media spettrale (whitening) per ridurre batteria e voce;
+   - prova uno smoothing mediano corto.
+4. **Modelli di accordo**: rivedi il peso del basso (fondamentale al basso) e il modello per gli accordi `*`, la cui grafia è identica ma che nel brano sono rapidi.
+5. Il primo evento esce a 0:00,0: verifica se è un artefatto (silenzio iniziale, rumore) e, se sì, togli il silenzio iniziale dal calcolo.
+6. Correggi il bias della sintonia (+6/+14 cent).
+
+Riporta una tabella prima/dopo: controllo locale per sezione, % vicino ai battiti, banco sintetico. Tieni solo le modifiche che migliorano. Obiettivo indicativo: controllo locale ≥ 75% sul reale. Se non ci arrivi, dillo e vai avanti con la UI: l'utente correggerà le sezioni gialle.
+
 ## Fase B — Integrazione nell'app
 
 - **Modello**: `song.audio.alignment = { version: 1, eventStartSec: [], confidence: [], sections: [{ startSec, bpm, confidence }], transposeFound, tuningCents, createdAt }`.
