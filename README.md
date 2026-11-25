@@ -52,9 +52,9 @@ Screenshot e numeri vanno in `test-artifacts/` (ignorato da git).
 
 ## Usarla sul telefono
 
-*Sezione provvisoria: il coordinatore la completerà con l'hosting scelto.*
+L'app è pubblicata su **https://iaco01.github.io/GuitarApp/** tramite GitHub Pages: a ogni push su `main` la GitHub Action `.github/workflows/pages.yml` esegue i test, fa la build e pubblica `dist/index.html`.
 
-1. Apri l'indirizzo dell'app nel browser del telefono (oppure copia `dist/index.html` sul telefono e aprilo). Funziona offline dopo il primo caricamento se il browser la tiene in cache; i dati (brani, audio) restano nel browser: usa «Esporta libreria» per un backup.
+1. Apri https://iaco01.github.io/GuitarApp/ nel browser del telefono (Chrome su Android, Safari su iOS). Funziona offline dopo il primo caricamento se il browser la tiene in cache; i dati (brani, audio) restano nel browser: usa «Esporta libreria» per un backup.
 2. Aggiungi alla schermata Home dal menu del browser per averla a schermo intero.
 3. Importa il file `.mht` con «Importa .mht»; per l'audio apri il brano e tocca «Aggiungi audio».
 
