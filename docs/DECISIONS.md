@@ -79,3 +79,25 @@ Registro delle scelte che la spec non fissa. Formato: data, decisione, motivo. C
 - **"Sostituisci"**: etichetta con data e ora, poi "(copia N)" (`labelCopies`); `mergeIntoExisting` ora in `model.js` e conserva transpose, capo, showShapes e audio.
 - **Selettore capotasto libero** 0–12 nel foglio. **Forme**: aug, add9 (barré E/A), m9 (solo forma E), più Dadd9 e Fadd9 aperti.
 - **Test regressione round 3**: `test/regression/round3.todo.test.js` spostato in `test/round3-fixes.test.js` senza `todo`.
+
+## Round 5 (implementatore)
+
+- **Suggerimento BPM = un fattore unico.** Tra due ancore (o ultima ancora e "Fine brano") si confronta la durata misurata con quella prevista dai BPM salvati: `k = previsto / misurato`. "Applica" moltiplica il BPM di *ogni* sezione del tratto per `k` (arrotondato a 0,1): i rapporti tra le sezioni restano. Il testo dice la percentuale e il BPM in più/meno ("da +0,3 a +0,7 BPM circa" se le sezioni hanno tempi diversi). Il campo `suggested` resta il BPM medio pesato dopo la correzione, `current` quello prima; in più `factor`, `expected`, `seconds`.
+- **Soglia sull'errore di tempo**, non sul BPM: suggerimento solo se `|misurato − previsto| > max(150 ms, 0,3% del tratto)`. Costanti `SYNC_ERR_MIN_SEC` e `SYNC_ERR_REL` in `src/audiosync.js` (sostituiscono `SYNC_BPM_TOLERANCE`).
+- **Timeline tra ancore: scala uniforme, mai vuoti.** In ogni tratto tra due ancore consecutive tutte le sezioni sono scalate dello stesso fattore, sia che sforino sia che avanzino; dopo l'ultima ancora valgono i BPM salvati (la fine brano non ancora usata dalla timeline: serve solo al suggerimento). Ogni sezione della timeline ha `bpm` (effettivo), `savedBpm` e `scale`. Il pannello mostra "♩ ≈ x" quando l'effettivo differisce dal salvato di più di 0,2. Le sezioni dell'intestazione e il BPM nell'editor mostrano ancora il salvato.
+- **Ancore ⚓ sempre visibili** se il brano ha metadati audio (anche con "audio mancante": sono dati salvati). Tocco sulla ⚓ (vista brano e schermata di sincronizzazione) → foglio dal basso con ±10/±50 ms e "Togli l'ancora" (l'offset della sezione 0 non si toglie). I pulsanti ±0,1 s delle righe sono stati sostituiti da questo foglio.
+- **Libreria: "audio ✓" solo se il file c'è in IndexedDB.** La lista si disegna con un badge neutro "audio"; poi un controllo asincrono (`audioStoreHas`, risultato in cache per la vista) lo aggiorna a "audio ✓" o "audio mancante" (arancione).
+- **"Primo accordo!"** fissa l'inizio del primo evento che non è pausa: `offset = tocco − startSec(primo accordo vero)`, con i BPM salvati e senza altre ancore (`firstChordOffsetSec`). Se il tocco cade prima della fine della pausa, messaggio "Troppo presto" invece di un offset negativo.
+- **Schermata di sincronizzazione**: barra fissa in basso con "Primo accordo!" e "⚓ <sezione>" (≥ 56 px, due colonne), sotto −5 s / Play / +5 s / posizione / "⋯". Dietro "⋯": barra di scorrimento e "Ascolta dall'inizio (con il clic)". Su iPhone SE la barra occupa meno del 20% dell'altezza. Il messaggio è un foglio fisso sopra la barra (va a capo, sparisce dopo 5 s, 9 s se errore; il testo resta nel DOM). Il pulsante grande di "Primo accordo!" non sta più nel riquadro "2. Inizio".
+- **Pannello di riproduzione**: "🔁 Sezione" (tocco = esci dal loop) e icona del clic 🔔/🔕 sempre visibili nella seconda riga.
+- **Spaziatura del testo**: l'etichetta dell'accordo sta in un contenitore di larghezza zero (`.chw`) e sporge sopra il testo senza spostarlo. Il segmento si allarga solo se `col(successivo) − col(questo) < lunghezza etichetta + 1`, di quanto manca; i segmenti senza testo (righe strumentali, accordo oltre la fine) hanno `lunghezza + 1`. In modifica durate la lunghezza conta anche il numero di battiti (+2). Per evitare scroll orizzontale, `.screen { overflow-x: clip }`.
+- **Messaggi dell'e2e del round 4**: `round4.cjs` S6 ora si aspetta *nessun* suggerimento per uno scarto di 0,12 s su 5 s (sotto soglia); la precisione è garantita dalle ancore.
+
+## Limiti noti della v1
+
+- Da provare su telefono vero: Wake Lock, leggibilità all'aperto, intonazione al 75% (`preservesPitch`) su Safari, clic e audio con cuffie Bluetooth (il clic non compensa la latenza: audio e clic escono dalla stessa uscita, ma va confermato a orecchio), file `.mht` da Safari/Chrome Android.
+- Caug e C#aug/Dbaug hanno solo forme da 5 dita (musicalmente giuste, poco suonabili).
+- Il registratore a tap non suona l'audio: con un brano che ha l'audio si registra "a vuoto" (le durate si correggono con −/+).
+- Il clic sopra l'audio non compensa la latenza dell'uscita (vale solo se audio e clic escono insieme).
+- "Fine brano" serve solo al suggerimento BPM: dopo l'ultima ancora la timeline usa i BPM salvati.
+- Con un'etichetta lunga all'estremo destro di una riga, vicino a una parola di una lettera, l'etichetta può sporgere nel margine della sezione (non crea scroll).

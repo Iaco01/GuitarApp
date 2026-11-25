@@ -158,7 +158,8 @@ export function createPlayer({ timeline, timeSignature = [4, 4], onFrame, onStat
     if (onState) onState(s);
   }
 
-  function click(when, accent) {
+  function click(whenIn, accent) {
+    const when = Math.max(0, whenIn); // a click a few ms late on a brand new context would be negative
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.frequency.value = accent ? 1000 : 800;

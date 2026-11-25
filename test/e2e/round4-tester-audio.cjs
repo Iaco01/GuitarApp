@@ -231,7 +231,7 @@ async function idbKeys(page) {
     await page.click('#sync-play');
     const sug = await page.innerText('#sync-sugs');
     info('B3W anchors', `Finale anchor shown ${anchorTxt}; expected ${finStart.toFixed(3)} s; stored ${anchorVal && anchorVal.audio ? JSON.stringify(anchorVal.audio.anchors) : 'n/a'}`);
-    rec('B3W suggestion detects the Finale at 96 (now 97)', /Finale/.test(sug) && /96(,0)? BPM/.test(sug) && /ora 97/.test(sug), JSON.stringify(sug));
+    rec('B3W suggestion detects the Finale as slower (97 -> 96)', /Nella sezione Finale l’audio va il 1(,\d)?% più lento: −1 BPM circa/.test(sug), JSON.stringify(sug));
     await page.screenshot({ path: path.join(DIR, 'b3w-suggestion.png') });
     // apply only the suggestion about the Finale (a multi-section one would flatten 70/96/142, bug)
     const sugCount = await page.$$eval('#sync-sugs .sync-sug', (s) => s.length);
@@ -266,6 +266,7 @@ async function idbKeys(page) {
     const tl = await page.evaluate(() => window.__gapp.timeline.sections.map((s) => [s.startSec, s.endSec, s.bpm]));
     const gap = tl[2][0] - tl[1][1];
     info('B3G Strofa at 100 instead of 96, Ponte anchored', `Strofa ends ${tl[1][1].toFixed(3)} s, Ponte anchor ${tl[2][0].toFixed(3)} s, gap ${(gap * 1000).toFixed(0)} ms; suggestion: ${JSON.stringify(sugFast)}`);
+    rec('B3G round 5: no gap before an anchored section (stretched, not held)', Math.abs(gap) < 0.001, `gap ${(gap * 1000).toFixed(1)} ms`);
     // look at the panel in the middle of the gap
     await page.click('#btn-more');
     await page.click('#btn-metro'); // clicks on, to see what the metronome does in the gap

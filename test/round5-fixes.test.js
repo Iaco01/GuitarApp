@@ -5,9 +5,9 @@ import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { parseSongFromMht } from '../src/parser.js';
-import { createSong, effectiveSectionBpms } from '../src/model.js';
+import { createSong, effectiveSectionBpms, insertPause } from '../src/model.js';
 import { buildTimeline, eventIndexAtTime } from '../src/timeline.js';
-import { suggestSectionBpms, applyBpmSuggestion, audioAnchors } from '../src/audiosync.js';
+import { suggestSectionBpms, applyBpmSuggestion, audioAnchors, firstChordOffsetSec } from '../src/audiosync.js';
 
 // three sections at 70 / 96 / 142 BPM, 8 beats each (synthetic)
 function song3() {
@@ -93,4 +93,17 @@ test('real file: "Fine brano" + Apply with a recording 0.5% shorter keeps the se
   // error at the end of the song after applying: < 50 ms
   assert.ok(Math.abs(3 + nat(after) - end) < 0.05, `end error ${(3 + nat(after) - end) * 1000} ms`);
   assert.deepEqual(suggestSectionBpms(s, s.audio), []);
+});
+
+test('"Primo accordo!" counts from the first real chord, not from a leading pause', () => {
+  const s = song3();
+  assert.equal(firstChordOffsetSec(s), 0);
+  insertPause(s, 0); // 4 beats of rest at 70 BPM before the first chord
+  const pause = (4 * 60) / 70;
+  assert.ok(Math.abs(firstChordOffsetSec(s) - pause) < 1e-9);
+  // the user taps at 6 s when the first chord sounds: the song starts 4 beats earlier
+  const offset = 6 - firstChordOffsetSec(s);
+  const tl = buildTimeline(s, { anchors: { 0: offset } });
+  assert.equal(tl.events[0].rest, true);
+  assert.ok(Math.abs(tl.events.find((e) => !e.rest).startSec - 6) < 1e-9);
 });

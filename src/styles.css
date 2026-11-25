@@ -325,7 +325,6 @@ h1, h2, h3, p, ul, ol, dl, dd { margin: 0; }
 .sync-box { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
 .sync-box h3 { font-size: 16px; }
 .sync-dyn { display: grid; gap: 12px; }
-.sync-tap { flex: none; min-height: 140px; font-size: 32px; }
 .sync-offset { font: 700 16px var(--mono); }
 .sync-fine .btn { flex: 1; }
 .sync-next { min-height: 72px; font-size: 20px; }
@@ -367,3 +366,4 @@ h1, h2, h3, p, ul, ol, dl, dd { margin: 0; }
 .pp-loop { flex: 0 1 auto; max-width: 110px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; line-height: 40px; border-color: var(--accent); color: var(--accent); }
 .pp-loop[hidden] { display: none; }
 .badge.missing { background: color-mix(in srgb, #f08c00 35%, transparent); color: var(--fg); font-weight: 700; }
+.sheet { z-index: 40; }

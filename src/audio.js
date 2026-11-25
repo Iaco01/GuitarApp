@@ -61,7 +61,8 @@ export function createAudioPlayer({ timeline, blob, latencyMs = 0, onFrame, onSt
   }
 
   // ---- clicks ----
-  function click(when, accent) {
+  function click(whenIn, accent) {
+    const when = Math.max(0, whenIn); // a click a few ms late on a brand new context would be negative
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.frequency.value = accent ? 1000 : 800;

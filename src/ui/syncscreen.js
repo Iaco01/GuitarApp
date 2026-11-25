@@ -104,7 +104,8 @@ export function openSyncScreen({ song, persist, onClose, blob = null }) {
     const key = Math.round(t * 10) + '|' + info.state;
     if (key === lastPosKey) return;
     lastPosKey = key;
-    posLbl.textContent = `${formatClock(t)} / ${formatClock(song.audio ? song.audio.durationSec : 0)}`;
+    posLbl.textContent = formatClock(t);
+    posLbl.title = `su ${formatClock(song.audio ? song.audio.durationSec : 0)}`;
     if (document.activeElement !== scrub) scrub.value = String(Math.max(0, t));
   }
 
@@ -326,7 +327,7 @@ export function openSyncScreen({ song, persist, onClose, blob = null }) {
       nextBtn.textContent = '⚓ Tutte fissate';
     } else {
       nextBtn.disabled = false;
-      nextBtn.textContent = `⚓ ${sectionName(nextIdx)}`;
+      nextBtn.textContent = `⚓ Inizio: ${sectionName(nextIdx)}`;
       nextBtn.setAttribute('aria-label', `Inizio sezione: ${sectionName(nextIdx)}`);
     }
   }

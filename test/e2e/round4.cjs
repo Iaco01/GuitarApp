@@ -288,18 +288,18 @@ const fmt = (v) => `${v.toFixed(0)} ms`;
     rec('S6 anchors shown for sections 1-3', rows.length === 3 && rows.every((r) => r.startsWith('⚓')), rows.join(' | '));
     const sug = await page.evaluate(() => [...document.querySelectorAll('#sync-sugs .sync-sug')].map((e) => e.querySelector('span').textContent));
     note('S6', 'suggestions: ' + JSON.stringify(sug));
-    rec('S6 BPM suggestion for the middle section only', sug.length === 1 && /Ponte sembra a 92 BPM \(ora 90\)/.test(sug[0]), JSON.stringify(sug));
-    await page.evaluate(() => document.querySelector('#sync-sugs [data-act="apply"]').scrollIntoView({ block: 'center' }));
+    // the middle section is 0.12 s off over 5 s: below the max(150 ms, 0.3%) threshold, so no suggestion; the anchors fill it
+    rec('S6 no tempo suggestion for an error below 150 ms', sug.length === 0, JSON.stringify(sug));
     await page.screenshot({ path: path.join(OUT, 'sync-suggestion.png') });
-    await page.click('#sync-sugs [data-act="apply"]');
-    const afterApply = await page.evaluate(() => { const s = JSON.parse(localStorage.getItem('gapp.song.synthetic-audio-song')); return { bpm: s.sections.map((x) => x.bpm), src: s.sections[1].bpmSource, n: document.querySelectorAll('#sync-sugs .sync-sug').length }; });
-    rec('S6 applying sets the BPM of the section and clears the suggestion', afterApply.bpm[1] === 92 && afterApply.src === 'edited' && afterApply.n === 0, JSON.stringify(afterApply));
     // an impossible anchor is refused
     await seekSync(2.0);
     await page.click('#sync-rows li[data-sec="2"] [data-act="remove"]');
     await page.click('#sync-rows li[data-sec="2"] [data-act="here"]');
     const refused = await page.innerText('#sync-msg');
     rec('S6 an anchor before the previous one is refused with a message', /dopo la sezione precedente/.test(refused), refused);
+    // put the anchor back where the section really starts (the tempo of the middle section is 0.12 s off: the anchors absorb it)
+    await seekSync(bOn[8]);
+    await page.click('#sync-rows li[data-sec="2"] [data-act="here"]');
     await page.click('#sync-close');
     await page.waitForFunction(() => window.__gapp && window.__gapp.audioEl);
     const ancHead = await page.evaluate(() => [...document.querySelectorAll('.sec-anchor')].map((e) => e.textContent));
@@ -365,7 +365,7 @@ const fmt = (v) => `${v.toFixed(0)} ms`;
     const exportPath = path.join(OUT, 'export-with-audio.json');
     const exported = JSON.parse(fs.readFileSync(exportPath, 'utf-8'));
     const meta = exported.songs[0].audio;
-    rec('S8 export carries the audio metadata without the file', meta && meta.fileName === 'track-b.wav' && Math.abs(meta.offsetSec - 1.7) < 0.01 && Object.keys(meta.anchors).length === 1 && meta.endSec > 14 && !JSON.stringify(exported).includes('RIFF'), JSON.stringify(meta));
+    rec('S8 export carries the audio metadata without the file', meta && meta.fileName === 'track-b.wav' && Math.abs(meta.offsetSec - 1.7) < 0.01 && Object.keys(meta.anchors).length === 2 && meta.endSec > 14 && !JSON.stringify(exported).includes('RIFF'), JSON.stringify(meta));
     for (const variant of ['same', 'different-keep', 'different-drop']) {
       const { browser, page, errors } = await open();
       await page.setInputFiles('#import-json', exportPath);
@@ -386,8 +386,8 @@ const fmt = (v) => `${v.toFixed(0)} ms`;
       await page.setInputFiles('#audio-reload', file);
       await page.waitForFunction(() => window.__gapp && window.__gapp.audioEl, null, { timeout: 15000 });
       const st = await page.evaluate(() => { const a = JSON.parse(localStorage.getItem('gapp.song.synthetic-audio-song')).audio; return { off: a.offsetSec, anchors: Object.keys(a.anchors).length, name: a.fileName, shown: document.querySelectorAll('.sec-anchor').length }; });
-      if (variant === 'same') rec('S8 same name and size: no question, offset and anchors kept', asked === 0 && Math.abs(st.off - 1.7) < 0.01 && st.anchors === 1 && st.shown === 2, JSON.stringify(st));
-      if (variant === 'different-keep') rec('S8 different file, answer yes: offset and anchors kept', asked === 1 && Math.abs(st.off - 1.7) < 0.01 && st.anchors === 1 && st.name === 'track.mp3', JSON.stringify(st));
+      if (variant === 'same') rec('S8 same name and size: no question, offset and anchors kept', asked === 0 && Math.abs(st.off - 1.7) < 0.01 && st.anchors === 2 && st.shown === 3, JSON.stringify(st));
+      if (variant === 'different-keep') rec('S8 different file, answer yes: offset and anchors kept', asked === 1 && Math.abs(st.off - 1.7) < 0.01 && st.anchors === 2 && st.name === 'track.mp3', JSON.stringify(st));
       if (variant === 'different-drop') rec('S8 different file, answer no: offset and anchors reset', asked === 1 && st.off === 0 && st.anchors === 0 && st.name === 'track.mp3', JSON.stringify(st));
       if (variant === 'same') {
         // the mp3 also plays: highlight within 100 ms of the real change
