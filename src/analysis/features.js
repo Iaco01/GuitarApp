@@ -2,6 +2,7 @@
 // bass chromagram and onset envelope (spectral flux). Input: mono Float32Array + sample rate.
 
 import { fftRealPairMagnitudes } from './fft.js';
+import { runSteps } from './steps.js';
 
 export const FEATURE_RATE = 11025;
 const CHROMA_WIN = 4096;
@@ -37,8 +38,8 @@ function hann(n) {
 }
 
 // Calls fn(t, magSpectrumOfFrame) for every frame t of the STFT (frame t centred on t*hop), two
-// frames per FFT. The spectrum buffer is reused between calls.
-function forEachFrame(x, win, hop, nFrames, fn) {
+// frames per FFT. The spectrum buffer is reused between calls. A generator: it yields every 32 FFTs.
+function* forEachFrame(x, win, hop, nFrames, fn) {
   const w = hann(win);
   const a = new Float64Array(win);
   const b = new Float64Array(win);
@@ -60,6 +61,7 @@ function forEachFrame(x, win, hop, nFrames, fn) {
     fftRealPairMagnitudes(a, b, magA, magB, re, im);
     fn(t, magA);
     if (t + 1 < nFrames) fn(t + 1, magB);
+    if ((t & 63) === 62) yield;
   }
 }
 
@@ -132,7 +134,12 @@ export function estimateTuningCents(x, sampleRate = FEATURE_RATE) {
 // Returns { fps, frames, chroma, bass, onset, onsetFps, tuningCents, duration }:
 //   chroma / bass: Float32Array(frames * 12), log-compressed, tuning corrected, C = 0 .. B = 11;
 //   onset: spectral-flux envelope (mean 1) at onsetFps.
-export function computeFeatures(x, { chromaHop = 1024, onProgress = null } = {}) {
+export function computeFeatures(x, opts = {}) {
+  return runSteps(computeFeaturesSteps(x, opts));
+}
+
+// Same as computeFeatures, as a generator that yields every few tens of milliseconds of work.
+export function* computeFeaturesSteps(x, { chromaHop = 1024, onProgress = null } = {}) {
   const sr = FEATURE_RATE;
   // level normalisation: rms 0.1
   let ss = 0;
@@ -151,7 +158,7 @@ export function computeFeatures(x, { chromaHop = 1024, onProgress = null } = {})
   const peaks = [];
   const progress = (f) => { if (onProgress) onProgress(f); };
 
-  forEachFrame(xn, CHROMA_WIN, chromaHop, frames, (t, mag) => {
+  yield* forEachFrame(xn, CHROMA_WIN, chromaHop, frames, (t, mag) => {
     const base = t * 12;
     spectralPeaks(mag, df, 100, 2000, 0.03, peaks);
     for (const p of peaks) {
@@ -196,7 +203,7 @@ export function computeFeatures(x, { chromaHop = 1024, onProgress = null } = {})
   const flux = new Float32Array(oFrames);
   const kMax = Math.floor((4000 * ONSET_WIN) / sr);
   const prev = new Float32Array(kMax + 1);
-  forEachFrame(xn, ONSET_WIN, ONSET_HOP, oFrames, (t, mag) => {
+  yield* forEachFrame(xn, ONSET_WIN, ONSET_HOP, oFrames, (t, mag) => {
     let f = 0;
     for (let k = 3; k <= kMax; k++) {
       const l = Math.log(1 + 0.05 * mag[k]);

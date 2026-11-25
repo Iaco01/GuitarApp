@@ -1,9 +1,10 @@
 // Automatic sync orchestrator (pure): from the decoded audio and the song, finds the start of every
 // chord event, the tempo of every section and the transposition/tuning of the recording.
 
-import { resampleMono, computeFeatures, FEATURE_RATE } from './features.js';
+import { resampleMono, computeFeaturesSteps, FEATURE_RATE } from './features.js';
+import { runSteps } from './steps.js';
 import { tempoCurves, curveOfRange, pickTempo, trackBeats, summariseBeats } from './beats.js';
-import { alignEvents, snapToOnsets, snapToBeats, gridBonusFrames } from './align.js';
+import { alignEventsSteps, snapToOnsets, snapToBeats, gridBonusFrames } from './align.js';
 import { estimateSongDurations } from '../durations.js';
 import { effectiveSectionBpms } from '../model.js';
 
@@ -37,20 +38,29 @@ function wrapSemis(n) {
 // { eventStartSec[], eventEndSec[], confidence[], sections: [{ startSec, endSec, bpm, confidence,
 //   bpmConfidence, beatGrid }], eventBeats[], transposeFound, transposeMargin, tuningCents,
 //   computeMs, timings }
-export function analyseAndAlign({ samples, sampleRate, song, onProgress = null, now = () => Date.now(), opts = {} }) {
+export function analyseAndAlign(args) {
+  return runSteps(analyseAndAlignSteps(args));
+}
+
+// Same computation as a generator (yields every few tens of ms of work): drive it with runSteps (all at
+// once) or runStepsAsync (slices with an await between them, progress bar and cancel in the app).
+// onProgress(0..1) is called along the way.
+export function* analyseAndAlignSteps({ samples, sampleRate, song, onProgress = null, now = () => Date.now(), opts = {} }) {
   const t0 = now();
   const timings = {};
   const lap = (k, since) => { timings[k] = now() - since; return now(); };
   let tk = now();
   const x = resampleMono(samples, sampleRate, FEATURE_RATE);
   tk = lap('resample', tk);
-  const feat = computeFeatures(x, { ...(opts.feat || {}), onProgress: onProgress ? (f) => onProgress(0.05 + 0.45 * f) : null });
+  yield;
+  const feat = yield* computeFeaturesSteps(x, { ...(opts.feat || {}), onProgress: onProgress ? (f) => onProgress(0.05 + 0.45 * f) : null });
   tk = lap('features', tk);
   const events = songEvents(song);
   // the capo is not considered: the written chords are the sounding ones (see transpose.js)
-  let al = alignEvents(feat, events, { onset: feat.onset, ...(opts.align || {}) });
+  let al = yield* alignEventsSteps(feat, events, { onset: feat.onset, onProgress: onProgress ? (f) => onProgress(0.5 + 0.3 * f) : null, ...(opts.align || {}) });
   tk = lap('align', tk);
   if (onProgress) onProgress(0.8);
+  yield;
   if (!al) return null;
   const N = events.length;
   const hints = effectiveSectionBpms(song);
@@ -60,7 +70,7 @@ export function analyseAndAlign({ samples, sampleRate, song, onProgress = null, 
   if (opts.regrid && grids.length) {
     // second pass: the boundaries of the stable stretches are drawn to the beat / half-beat grid
     const gb = gridBonusFrames(grids, feat.fps, feat.frames, { gamma: opts.gridGamma ?? 4, width: opts.gridWidth ?? 0.3 });
-    const al2 = alignEvents(feat, events, { onset: feat.onset, ...(opts.align || {}), shift: al.shift, gridBonus: gb });
+    const al2 = yield* alignEventsSteps(feat, events, { onset: feat.onset, ...(opts.align || {}), shift: al.shift, gridBonus: gb });
     if (al2) { finalAl = al2; ({ startSec, endSec, sections, eventBeats, grids } = describe(al2)); }
   }
   tk = lap('regrid', tk);
@@ -123,6 +133,7 @@ export function analyseAndAlign({ samples, sampleRate, song, onProgress = null, 
     return { startSec, endSec, sections, eventBeats, grids };
   }
   al = finalAl;
+  if (onProgress) onProgress(1);
   return {
     eventStartSec: startSec,
     eventEndSec: endSec,

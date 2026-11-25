@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { fftRealMagnitudes, dftNaiveMagnitudes, fftRealPairMagnitudes } from '../src/analysis/fft.js';
 import { resampleMono } from '../src/analysis/features.js';
 import { chordTemplate, snapToBeats, gridBonusFrames } from '../src/analysis/align.js';
-import { analyseAndAlign } from '../src/analysis/autosync.js';
+import { analyseAndAlign, analyseAndAlignSteps } from '../src/analysis/autosync.js';
+import { runStepsAsync, CANCELLED } from '../src/analysis/steps.js';
 import { makeRealistic } from './fixtures/make-realistic.mjs';
 
 test('fft matches a naive DFT (single and paired frames)', () => {
@@ -64,4 +65,21 @@ test('gridBonusFrames peaks on the beat grid and is zero outside the stretch', (
   const g = gridBonusFrames([{ times: [1, 2, 3], bpm: 60, from: 0.5, to: 3.5 }], 10, 60, { gamma: 4, width: 0.3 });
   assert.ok(g[10 + 0.5 | 0] > 3 || g[11] > 3);
   assert.equal(g[50], 0);
+});
+
+test('stepped run: same result as the synchronous one, many yields, progress and cancel', async () => {
+  const r = makeRealistic({ preset: 'short', seed: 3, sampleRate: 22050 });
+  const args = { samples: r.samples, sampleRate: r.sampleRate, song: r.song };
+  const sync = analyseAndAlign(args);
+  const prog = [];
+  let yields = 0;
+  const res = await runStepsAsync(analyseAndAlignSteps({ ...args, onProgress: (f) => prog.push(f) }), { sliceMs: 0, yieldFn: async () => { yields++; } });
+  assert.deepEqual(res.eventStartSec, sync.eventStartSec);
+  assert.deepEqual(res.confidence, sync.confidence);
+  assert.deepEqual(res.sections.map((x) => x.bpm), sync.sections.map((x) => x.bpm));
+  assert.equal(res.transposeFound, sync.transposeFound);
+  assert.ok(yields > 20, 'yields: ' + yields);
+  assert.ok(prog.length > 5 && prog.every((v, i) => i === 0 || v >= prog[i - 1] - 1e-9) && prog[prog.length - 1] === 1);
+  let n = 0;
+  await assert.rejects(runStepsAsync(analyseAndAlignSteps(args), { sliceMs: 0, yieldFn: async () => {}, shouldCancel: () => ++n > 5 }), (e) => e.message === CANCELLED);
 });

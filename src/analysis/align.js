@@ -10,6 +10,7 @@
 
 import { parseChord } from '../chord.js';
 import { pitchClassOf } from '../transpose.js';
+import { runSteps } from './steps.js';
 
 const G_CHROMA = 15;
 const G_BASS = 2.5;
@@ -246,6 +247,11 @@ export function rankTranspositions(feat, events, chordSet, priorBeats) {
 //   candidates: how many transpositions are tried in full (default 3, plus 0).
 // Returns { startSec[], endSec[], confidence[], shift, shiftMargin, score, scales } or null.
 export function alignEvents(feat, events, options = {}) {
+  return runSteps(alignEventsSteps(feat, events, options));
+}
+
+// Same as alignEvents, as a generator (yields between the Viterbi runs; options.onProgress(0..1)).
+export function* alignEventsSteps(feat, events, options = {}) {
   const N = events.length;
   if (N === 0 || feat.frames < 10) return null;
   const fps = feat.fps;
@@ -263,9 +269,14 @@ export function alignEvents(feat, events, options = {}) {
   const sumPrior = priorBeats.reduce((a, b) => a + b, 0);
   const s0 = (T * 0.95) / sumPrior; // frames per prior beat, whole recording
 
-  const run = (shift, stages) => {
+  const total = (options.candidates ?? 3) + 1 + 3; // runs, upper bound (progress only)
+  let done = 0;
+  const step = () => { done++; if (options.onProgress) options.onProgress(Math.min(1, done / total)); };
+  const run = function* (shift, stages) {
     const em = emissions(feat, chordSet.chords, shift, options.gChroma ?? G_CHROMA, options.gBass ?? G_BASS);
+    yield;
     const cumE = cumulative(em.em, em.D, T);
+    yield;
     let scales = new Float64Array(N).fill(s0);
     let res = null;
     let strideNow = 2;
@@ -295,6 +306,8 @@ export function alignEvents(feat, events, options = {}) {
       strideNow = stride;
       const durs = Array.from(res.ends, (e, j) => (e - (j ? res.ends[j - 1] : res.start0)) * stride);
       scales = localScales(durs, priorBeats, rest, 6, s0);
+      step();
+      yield;
     }
     return { res, em, cumE, scales, stride: strideNow };
   };
@@ -310,7 +323,7 @@ export function alignEvents(feat, events, options = {}) {
   const coarse = [{ stride: 2, dminF: 0.2, dmaxF: 5, sigma: 1.0 }];
   const results = [];
   for (const sh of shifts) {
-    const r = run(sh, coarse);
+    const r = yield* run(sh, coarse);
     if (r) results.push({ shift: sh, score: r.res.score });
   }
   if (!results.length) return null;
@@ -322,7 +335,7 @@ export function alignEvents(feat, events, options = {}) {
     { stride: 1, dminF: 0.3, dmaxF: 3.2, sigma: 0.6, band: 3 },
     { stride: 1, dminF: 0.35, dmaxF: 2.8, sigma: 0.5, band: 1.5 },
   ];
-  const fin = run(shift, stages);
+  const fin = yield* run(shift, stages);
   if (!fin) return null;
   const { res } = fin;
   const stride = res.stride;
