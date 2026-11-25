@@ -69,6 +69,8 @@ test('timeline: empty sections and empty songs', () => {
 });
 
 const FILE = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'local', 'american-pie.mht');
+// Round 6: durations are now estimated; with an average of 4 beats per chord the song total is still 4 x chords
+// (every section is a whole number of bars), so these totals hold, but for a different reason than in round 2.
 test('real file: default timeline totals and tempo change at Verse 1 -> Chorus', { skip: existsSync(FILE) ? false : 'file reale assente' }, () => {
   const song = parseSongFromMht(readFileSync(FILE, 'utf-8'));
   const t = buildTimeline(song);

@@ -1,6 +1,8 @@
 // Song model: creation, validation, migration and small helpers (pure).
 
-export const SONG_SCHEMA_VERSION = 2;
+import { estimateSongDurations } from './durations.js';
+
+export const SONG_SCHEMA_VERSION = 3;
 export const DEFAULT_BPM = 80;
 
 function modelUuid() {
@@ -28,7 +30,7 @@ export function createSong(partial = {}) {
     sections: [],
     transpose: 0,
     timingSource: 'default',
-    view: { fontScale: 1, theme: 'dark', collapseRepeats: true, beatsPerChord: 4, showShapes: false },
+    view: { fontScale: 1, theme: 'dark', collapseRepeats: true, beatsPerChord: 4, durationMode: 'estimated', bpmScope: 'all', showShapes: false },
     source: { fileName: '', importedAt: now },
     importInfo: { method: 'spans', warnings: [] },
     updatedAt: now,
@@ -103,6 +105,13 @@ export function migrateSong(obj) {
       strumIndex: sec.strumIndex === undefined ? null : sec.strumIndex,
     }));
     if (oldVersion < 2) applySectionTempos(merged);
+    // Schema 2 -> 3: songs still on the default durations get the ones estimated from the text.
+    if (oldVersion < 3 && merged.timingSource === 'default') {
+      const est = estimateSongDurations(merged, { beatsPerChordAvg: merged.view.beatsPerChord || 4 });
+      merged.sections = est.sections;
+      merged.timingSource = 'estimated';
+      merged.view.durationMode = 'estimated';
+    }
   }
   return merged;
 }
@@ -169,6 +178,11 @@ export function effectiveSectionBpms(song) {
     out.push(prev);
   }
   return out;
+}
+
+// True when the durations were typed or recorded by the user (not default or estimated).
+export function hasEditedDurations(song) {
+  return song.timingSource === 'edited' || song.timingSource === 'recorded';
 }
 
 // Sets the beats of every chord (global "beats per chord" setting).
@@ -316,7 +330,11 @@ export function mergeIntoExisting(fresh, old) {
     });
     if (oldSong.bpm) merged.bpm = oldSong.bpm;
   }
-  return { merged, sameStructure, hadEdits: oldSong.timingSource !== 'default' };
+  if (!sameStructure && oldSong.view.durationMode === 'fixed') {
+    setAllChordBeats(merged, oldSong.view.beatsPerChord || 4);
+    merged.timingSource = 'default';
+  }
+  return { merged, sameStructure, hadEdits: hasEditedDurations(oldSong) };
 }
 
 // Cleans the audio metadata of a song (import, migration). Returns null for anything unusable.
@@ -360,4 +378,45 @@ export function removePause(song, si, li, ci) {
   line.chords.splice(ci, 1);
   if (line.chords.length === 0 && !line.lyric) song.sections[si].lines.splice(li, 1);
   return true;
+}
+
+// ---- BPM scaling from the play panel ----
+
+export const BPM_SCALE_MIN = 30;
+export const BPM_SCALE_MAX = 300;
+const roundTenth = (v) => Math.round(v * 10) / 10;
+const clampBpm = (v) => Math.min(BPM_SCALE_MAX, Math.max(BPM_SCALE_MIN, v));
+
+// Copy of the tempo fields (undo of a BPM change).
+export function snapshotBpms(song) {
+  return { bpm: song.bpm, sections: song.sections.map((s) => ({ bpm: s.bpm, bpmSource: s.bpmSource })) };
+}
+
+export function restoreBpms(song, snap) {
+  song.bpm = snap.bpm;
+  song.sections.forEach((s, i) => {
+    s.bpm = snap.sections[i].bpm;
+    s.bpmSource = snap.sections[i].bpmSource;
+  });
+}
+
+// Sets the tempo of section `index` to `newBpm`. scope 'all': every section is scaled by the same
+// factor newBpm / (effective tempo of that section), so the ratios between sections stay; 'section':
+// only that one. Values are rounded to 0.1 and kept in 30-300. Returns the factor applied.
+export function applyBpmChange(song, index, newBpm, scope = 'all') {
+  const eff = effectiveSectionBpms(song);
+  const target = clampBpm(newBpm);
+  if (!song.sections[index]) return 1;
+  const k = target / eff[index];
+  const setSec = (i, v) => {
+    song.sections[i].bpm = roundTenth(clampBpm(v));
+    song.sections[i].bpmSource = 'edited';
+  };
+  if (scope === 'section') {
+    setSec(index, target);
+  } else {
+    song.sections.forEach((_, i) => setSec(i, i === index ? target : eff[i] * k));
+    if (song.bpm > 0) song.bpm = roundTenth(clampBpm(song.bpm * k));
+  }
+  return k;
 }

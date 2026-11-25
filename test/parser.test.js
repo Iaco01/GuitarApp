@@ -27,8 +27,10 @@ for (const file of VARIANTS) {
     const marked = s.sections.flatMap((x) => x.lines).filter((l) => l.chords.some((c) => c.mark));
     assert.equal(marked.length, 4);
     assert.equal(s.sections.flatMap((x) => x.lines).flatMap((l) => l.chords).filter((c) => c.mark === '*').length, 4);
-    assert.ok(s.sections.flatMap((x) => x.lines).flatMap((l) => l.chords).every((c) => c.beats === 4));
-    assert.equal(s.timingSource, 'default');
+    // round 6: the import estimates the durations from the chord positions (fixed 4 beats are no longer the default)
+    assert.ok(s.sections.flatMap((x) => x.lines).flatMap((l) => l.chords).every((c) => Number.isInteger(c.beats) && c.beats >= 1));
+    assert.ok(s.sections.every((x) => x.lines.flatMap((l) => l.chords).reduce((a, c) => a + c.beats, 0) % 4 === 0));
+    assert.equal(s.timingSource, 'estimated');
     assert.deepEqual(s.timeSignature, [4, 4]);
     assert.ok(validateSong(s).ok, validateSong(s).errors.join(';'));
   });

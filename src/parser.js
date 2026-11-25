@@ -4,6 +4,7 @@ import { visibleText, collapseSpaces, getAttr, classTokens, findElementEnd, remo
 import { extractMainHtml } from './mht.js';
 import { isChordName } from './chord.js';
 import { createSong, listChordNames, applySectionTempos } from './model.js';
+import { estimateSongDurations } from './durations.js';
 
 const CHORD_CLASS_RE = /js-chord-chord|tabContent-chord/;
 const ADS_ELEMENTS_RE = /div|bidding-[a-z0-9-]+|img|svg|script|style|iframe|noscript|ins/;
@@ -362,6 +363,8 @@ export function parseSong({ html, subject = '', url = '' }) {
   song.source.url = cleanSourceUrl(url);
   song.chords = listChordNames(song);
   applySectionTempos(song);
+  song.sections = estimateSongDurations(song).sections;
+  song.timingSource = 'estimated';
 
   if (song.chords.length === 0) warnings.push('Nel brano non sono stati trovati accordi');
   const carousel = carouselChords(pagePreStripped);
