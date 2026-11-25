@@ -415,6 +415,10 @@ h1, h2, h3, p, ul, ol, dl, dd { margin: 0; }
 .as-time { flex: none; white-space: nowrap; }
 .as-time { font: 700 15px var(--mono); }
 .as-sub { font: 600 13px var(--ui); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 340px) {
+  .as-row { padding: 4px 6px; gap: 0 6px; }
+  .as-sub { font-size: 12px; }
+}
 .as-shift .btn { min-width: 0; padding: 0 6px; white-space: nowrap; }
 .as-act { min-width: 44px; width: 44px; min-height: 44px; font-size: 18px; }
 .as-gap { font: italic 600 13px var(--ui); color: var(--muted); padding: 0 4px; }

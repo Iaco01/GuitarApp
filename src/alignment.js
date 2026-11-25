@@ -87,6 +87,9 @@ export function makeAlignment(result, song, createdAt = new Date().toISOString()
       };
     }),
     match: matchRatio(result) === null ? null : r3(matchRatio(result)),
+    // the alignment was found in a transposition that does not clearly beat the others: it may be a different song
+    // that shares some chords (not recognised, see alignmentRecognised)
+    shiftUntrusted: !transposeTrusted(result) && (result.transposeFound || 0) !== 0,
     forced: false,
     transposeFound: transposeTrusted(result) ? result.transposeFound || 0 : 0,
     tuningCents: Math.round((result.tuningCents || 0) * 10) / 10,
@@ -122,6 +125,7 @@ export function normalizeAlignment(raw) {
       skipped: !!(s && s.skipped),
     })),
     match: Number.isFinite(raw.match) ? raw.match : null,
+    shiftUntrusted: !!raw.shiftUntrusted,
     forced: !!raw.forced,
     transposeFound: Number.isInteger(raw.transposeFound) ? raw.transposeFound : 0,
     tuningCents: Number.isFinite(raw.tuningCents) ? raw.tuningCents : 0,
@@ -152,20 +156,27 @@ export function sectionState(alignment, si) {
 
 // Is the audio the song of the sheet? false when almost every section is red (wrong file, noise, silence).
 export function alignmentRecognised(alignment, song) {
+  if (alignment.shiftUntrusted) return false;
   const idx = sectionEventIndices(song);
   let n = 0;
   let red = 0;
   let skippedSecs = 0;
+  let good = 0;
+  let yellow = 0;
   idx.forEach((list, si) => {
     if (!list.length) return;
     const st = sectionState(alignment, si);
     if (st === 'skipped') { skippedSecs++; return; }
     n++;
     if (st === 'red') red++;
+    if (st === 'green' || st === 'verified') good++;
+    if (st === 'yellow') yellow++;
   });
   // almost everything skipped: nothing of the sheet is in the audio
   if (n === 0) return skippedSecs === 0;
-  if (red / n < NOT_RECOGNISED_RED) return true;
+  // (when part of the sheet is not in the audio, the rest must show some sign of the right song: a section that is sure,
+  // or at least two to check: a different song gets one yellow stretch at the start and the rest skipped)
+  if (red / n < NOT_RECOGNISED_RED) return skippedSecs === 0 || good >= 1 || yellow >= 2;
   // mostly red (a very noisy recording): still the right song if the sheet fits the audio far better in its best
   // transposition than in any other, and it is not mostly skipped
   return Number.isFinite(alignment.match) && alignment.match >= RECOGNISED_MATCH && skippedSecs <= n;

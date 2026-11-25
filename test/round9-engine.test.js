@@ -6,6 +6,7 @@ import { analyseAndAlign, songEvents } from '../src/analysis/autosync.js';
 import { makeAlignment, sectionState, effectiveEventTimes, normalizeAlignment, alignmentRecognised, capAtYellow } from '../src/alignment.js';
 import { buildTimeline, eventIndexAtTime } from '../src/timeline.js';
 import { makeTrack, makeForeign, concat, addNoiseSnr } from './e2e/round8-tester-make.mjs';
+import { makeBench } from './e2e/round8-tester-bench.mjs';
 
 const RATE = 11025;
 const base = makeTrack({ seed: 5, semis: 0, cents: 0, rate: RATE });
@@ -127,4 +128,16 @@ test('"Usa comunque" keeps an unrecognised alignment with every section yellow o
   assert.ok(al.forced);
   base.song.sections.forEach((_, si) => assert.ok(['yellow', 'red', 'skipped'].includes(sectionState(al, si)), `section ${si}: ${sectionState(al, si)}`));
   assert.equal(normalizeAlignment(JSON.parse(JSON.stringify(al))).forced, true);
+});
+
+test('a different song that is shorter than the sheet is not recognised, even if most of the sheet ends up skipped', () => {
+  const other = makeBench([
+    { name: 'A', kind: 'stable', bpm: 100, chords: [['Dm', 4], ['Bb', 4], ['Gm', 4], ['A', 4], ['Dm', 4], ['Bb', 4], ['F', 4], ['A', 4]] },
+    { name: 'B', kind: 'stable', bpm: 120, chords: [['E', 4], ['B', 4], ['C#m', 4], ['A', 4], ['E', 4], ['B', 4], ['A', 4], ['E', 4]] },
+    { name: 'C', kind: 'stable', bpm: 80, chords: [['F#m', 4], ['D', 4], ['A', 4], ['E', 4], ['F#m', 4], ['D', 4], ['A', 4], ['E', 4]] },
+    { name: 'D', kind: 'stable', bpm: 110, chords: [['Bb', 4], ['Eb', 4], ['Cm', 4], ['F', 4], ['Bb', 4], ['Eb', 4], ['F', 4], ['Bb', 4]] },
+  ], { seed: 3, rate: RATE });
+  const res = analyseAndAlign({ samples: other.samples, sampleRate: RATE, song: base.song });
+  const al = makeAlignment(res, base.song);
+  assert.equal(alignmentRecognised(al, base.song), false, `states ${base.song.sections.map((_, i) => sectionState(al, i)).join(',')}`);
 });

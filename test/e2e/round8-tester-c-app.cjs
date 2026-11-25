@@ -94,7 +94,10 @@ async function bpm() {
   const before = await bpms();
   await page.click('#pp-bpm'); await sleep(200);
   const fieldVis = await page.evaluate(() => { const e = document.querySelector('#pp-bpmedit'); return e && !e.hidden; });
-  if (fieldVis) { await page.fill('#pp-bpm-field', '150'); await page.click('#pp-bpm-apply'); await sleep(300); }
+  // round 9: with the alignment the number field and «Applica» are disabled like − and + (they cannot be used at all)
+  const fieldState = await page.evaluate(() => ({ field: document.querySelector('#pp-bpm-field').disabled, apply: document.querySelector('#pp-bpm-apply').disabled }));
+  rec('B2a the BPM field and «Applica» are disabled with the alignment (round 9)', fieldState.field && fieldState.apply, JSON.stringify(fieldState));
+  if (fieldVis && !fieldState.field) { await page.fill('#pp-bpm-field', '150'); await page.click('#pp-bpm-apply'); await sleep(300); }
   const after = await bpms();
   const noteAfter = await page.evaluate(() => ({ note: document.querySelector('#pp-bpm-lock').textContent.slice(0, 40), vis: !document.querySelector('#pp-bpm-lock').hidden, editOpen: !document.querySelector('#pp-bpmedit').hidden }));
   rec('B2 the BPM field + Applica change nothing with the alignment', JSON.stringify(before) === JSON.stringify(after), `field shown ${fieldVis}; ${JSON.stringify(noteAfter)}`);
@@ -106,6 +109,7 @@ async function bpm() {
   // tap tempo (should still work, or not?)
   const tap = await page.evaluate(() => { const b = document.querySelector('#btn-bpm-tap, #btn-tap'); return b ? { id: b.id, disabled: b.disabled } : null; });
   info('B2', `tap tempo button: ${JSON.stringify(tap)}`);
+  rec('B2c tap tempo is disabled with the alignment (round 9)', !!tap && tap.disabled, JSON.stringify(tap));
   if (tap) {
     const bb = await bpms();
     for (let i = 0; i < 5; i++) { await page.evaluate((id) => document.getElementById(id).click(), tap.id); await sleep(250); }
