@@ -114,6 +114,14 @@ Riporta una tabella prima/dopo: controllo locale per sezione, % vicino ai battit
   - pulsanti "Ascolta e controlla" (play dall'inizio) e "Accetta";
   - le sezioni gialle o rosse si correggono con gli strumenti esistenti (ancore, −/+ BPM).
 - La sincronizzazione manuale resta disponibile come ripiego.
+- **Correzione col tap sull'audio** (aggiunta dopo la Fase B0, dove il controllo locale sul reale è rimasto al 59%, quindi molte sezioni saranno da ritoccare):
+  - su una sezione gialla o rossa, "Correggi a orecchio" fa partire l'audio 2 s prima della sezione;
+  - l'utente tocca il grande pulsante "Cambio!" a ogni cambio d'accordo che sente;
+  - i tocchi, compensati con la latenza del dispositivo e con un ritardo medio di reazione di 0 ms regolabile, sostituiscono gli `eventStartSec` di quella sezione;
+  - prima di salvare, un'anteprima "ascolta" con evidenziazione;
+  - la sezione diventa "verificata" (verde scuro).
+  - Riusa il nucleo puro di `src/taprecord.js` dove possibile.
+- **Correzioni come verità**: le sezioni verificate a orecchio si possono esportare in un JSON (`{ eventStartSec, verified: true }` per sezione, solo tempi e nomi di accordi). Così il motore si potrà misurare e migliorare sui dati veri dell'utente. Aggiungi a `test/e2e/autosync-real.mjs` l'opzione per leggere un file del genere da `test/fixtures/local/` e calcolare l'errore vero entro 100/250/500 ms.
 - **Prestazioni**: misura in Playwright il tempo totale (decodifica + analisi) del brano reale con CPU rallentata ×4, per simulare un telefono (`page.context().newCDPSession` → `Emulation.setCPUThrottlingRate`). Obiettivo < 20 s.
 
 ## Consegna
