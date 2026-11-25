@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fftRealMagnitudes, dftNaiveMagnitudes, fftRealPairMagnitudes } from '../src/analysis/fft.js';
 import { resampleMono } from '../src/analysis/features.js';
-import { chordTemplate } from '../src/analysis/align.js';
+import { chordTemplate, snapToBeats, gridBonusFrames } from '../src/analysis/align.js';
 import { analyseAndAlign } from '../src/analysis/autosync.js';
 import { makeRealistic } from './fixtures/make-realistic.mjs';
 
@@ -51,4 +51,17 @@ test('synthetic short song: alignment, transposition, tempo', () => {
   assert.ok(Math.abs(res.sections[1].bpm - 112) <= 1.5);
   assert.ok(Math.abs(res.sections[2].bpm - 138) <= 1.5);
   assert.ok(res.eventStartSec.every((s, i) => i === 0 || s >= res.eventStartSec[i - 1]));
+});
+
+test('snapToBeats moves boundaries to beats, optionally to half beats', () => {
+  const beats = [10, 10.5, 11, 11.5]; // 120 BPM
+  assert.deepEqual(snapToBeats([10.04, 11.2], beats, 120, 0.2), [10, 11.2]);
+  const h = snapToBeats([10.27, 10.74], beats, 120, 0.3, true);
+  assert.ok(Math.abs(h[0] - 10.25) < 1e-9 && Math.abs(h[1] - 10.75) < 1e-9);
+});
+
+test('gridBonusFrames peaks on the beat grid and is zero outside the stretch', () => {
+  const g = gridBonusFrames([{ times: [1, 2, 3], bpm: 60, from: 0.5, to: 3.5 }], 10, 60, { gamma: 4, width: 0.3 });
+  assert.ok(g[10 + 0.5 | 0] > 3 || g[11] > 3);
+  assert.equal(g[50], 0);
 });

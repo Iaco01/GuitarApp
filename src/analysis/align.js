@@ -11,7 +11,7 @@
 import { parseChord } from '../chord.js';
 import { pitchClassOf } from '../transpose.js';
 
-const G_CHROMA = 10;
+const G_CHROMA = 15;
 const G_BASS = 2.5;
 const COS_EPS = 0.3;
 
@@ -78,7 +78,7 @@ export function buildChordSet(events) {
 
 // Per-frame cosine of every chord (cos) and the centred emission (em), as flat arrays
 // [chord * frames + t], plus cumulative sums with `frames + 1` entries per chord.
-function emissions(feat, chords, shift) {
+function emissions(feat, chords, shift, gC = G_CHROMA, gB = G_BASS) {
   const T = feat.frames;
   const D = chords.length;
   const cos = new Float32Array(D * T);
@@ -107,7 +107,7 @@ function emissions(feat, chords, shift) {
     mb /= D;
     for (let c = 0; c < D; c++) {
       cos[c * T + t] = zc[c];
-      em[c * T + t] = G_CHROMA * (zc[c] - mc) + G_BASS * (zb[c] - mb);
+      em[c * T + t] = gC * (zc[c] - mc) + gB * (zb[c] - mb);
     }
   }
   return { cos, em, D, T };
@@ -253,13 +253,18 @@ export function alignEvents(feat, events, options = {}) {
   const priorBeats = events.map((e) => (e.priorBeats > 0 ? e.priorBeats : 4));
   const rest = events.map((e) => !!e.rest);
   const chordSet = buildChordSet(events);
-  const bonus = options.onset ? boundaryBonus(options.onset, feat.onsetFps, fps, T, 0.06, 6) : null;
+  let bonus = options.onset ? boundaryBonus(options.onset, feat.onsetFps, fps, T, 0.06, 6) : null;
+  if (options.gridBonus) {
+    const g = new Float32Array(T + 1);
+    for (let f = 0; f <= T; f++) g[f] = (bonus ? bonus[f] : 0) + options.gridBonus[f];
+    bonus = g;
+  }
   const kappa = options.kappa ?? 0.5;
   const sumPrior = priorBeats.reduce((a, b) => a + b, 0);
   const s0 = (T * 0.95) / sumPrior; // frames per prior beat, whole recording
 
   const run = (shift, stages) => {
-    const em = emissions(feat, chordSet.chords, shift);
+    const em = emissions(feat, chordSet.chords, shift, options.gChroma ?? G_CHROMA, options.gBass ?? G_BASS);
     const cumE = cumulative(em.em, em.D, T);
     let scales = new Float64Array(N).fill(s0);
     let res = null;
@@ -375,17 +380,49 @@ export function snapToOnsets(startSec, onset, onsetFps, { win = 0.14, minStrengt
   return out;
 }
 
-// Moves the boundaries lying within `tol` beats of a tracked beat onto it.
-export function snapToBeats(times, beatTimes, bpm, tol = 0.2) {
+// Moves the boundaries lying within `tol` beats of a tracked beat (or, with `half`, of a half
+// beat) onto it.
+export function snapToBeats(times, beatTimes, bpm, tol = 0.2, half = false) {
   const p = 60 / bpm;
+  const grid = [];
+  for (let i = 0; i < beatTimes.length; i++) {
+    grid.push(beatTimes[i]);
+    if (half && i + 1 < beatTimes.length) grid.push((beatTimes[i] + beatTimes[i + 1]) / 2);
+  }
   return times.map((t) => {
     let best = null;
     let bd = Infinity;
-    for (const b of beatTimes) {
+    for (const b of grid) {
       const d = Math.abs(b - t);
       if (d < bd) { bd = d; best = b; }
       else if (b > t) break;
     }
     return best !== null && bd <= tol * p ? best : t;
   });
+}
+
+// Boundary bonus from beat grids (an array of { times, bpm, from, to } for stretches of stable
+// tempo): up to `gamma` for a boundary right on a beat or half beat, falling to 0 at `width`
+// seconds (relative to the half-beat period) from it. Indexed like the Viterbi boundaries (frame).
+export function gridBonusFrames(grids, fps, T, { gamma = 4, width = 0.3 } = {}) {
+  const out = new Float32Array(T + 1);
+  for (const g of grids) {
+    const half = 30 / g.bpm;
+    const pts = [];
+    for (let i = 0; i < g.times.length; i++) {
+      pts.push(g.times[i]);
+      pts.push(g.times[i] + half);
+    }
+    let k = 0;
+    const f0 = Math.max(0, Math.floor(g.from * fps));
+    const f1 = Math.min(T, Math.ceil(g.to * fps));
+    for (let f = f0; f <= f1; f++) {
+      const t = (f - 0.5) / fps;
+      while (k + 1 < pts.length && pts[k + 1] < t) k++;
+      let d = Math.abs(pts[k] - t);
+      if (k + 1 < pts.length) d = Math.min(d, Math.abs(pts[k + 1] - t));
+      out[f] += gamma * Math.max(0, 1 - d / (width * half * 2));
+    }
+  }
+  return out;
 }

@@ -75,11 +75,13 @@ function spectralPeaks(mag, df, fLo, fHi, relThreshold, out) {
   for (let k = kLo; k <= kHi; k++) {
     const m = mag[k];
     if (m < thr || m <= mag[k - 1] || m < mag[k + 1]) continue;
-    const a = mag[k - 1];
-    const c = mag[k + 1];
-    const den = a - 2 * m + c;
+    // parabolic interpolation on the log magnitude (nearly unbiased for a Hann window)
+    const a = Math.log(mag[k - 1] + 1e-12);
+    const b = Math.log(m + 1e-12);
+    const c = Math.log(mag[k + 1] + 1e-12);
+    const den = a - 2 * b + c;
     const p = den < 0 ? Math.max(-0.5, Math.min(0.5, (0.5 * (a - c)) / den)) : 0;
-    out.push({ f: (k + p) * df, m: m - 0.25 * (a - c) * p });
+    out.push({ f: (k + p) * df, m: m * Math.exp(-0.25 * (a - c) * p) });
   }
   return max;
 }

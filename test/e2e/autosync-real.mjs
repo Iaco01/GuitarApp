@@ -59,3 +59,21 @@ const c2 = independentCheck(ic, events, res.eventStartSec, res.eventEndSec, res.
 console.log(`controllo indipendente locale (${c0.n} cambi): entrambi ${c0.both.toFixed(1)}%  uscente ${c0.out.toFixed(1)}%  entrante ${c0.in.toFixed(1)}%`);
 console.log(`  riferimento con i cambi spostati di +-0,9 s: ${c1.both.toFixed(1)}% / ${c2.both.toFixed(1)}%`);
 console.log('  per sezione: ' + c0.perSection.map((p, i) => `${i + 1}:${p === null ? '-' : p + '%'}`).join(' '));
+
+// ---- closeness of the changes to the tracked beats (stable-tempo sections only; chance about 24%
+// for whole beats and about 48% for the beat + half-beat grid, at +-0.12 beat)
+let nt = 0, nb = 0, nh = 0;
+res.sections.forEach((s, i) => {
+  if (!s.beatTimes || !s.bpm) return;
+  const p = 60 / s.bpm;
+  events.forEach((e, j) => {
+    if (e.section !== i || j === 0) return;
+    const t = res.eventStartSec[j];
+    let d = Infinity, dh = Infinity;
+    for (const b of s.beatTimes) { d = Math.min(d, Math.abs(b - t)); dh = Math.min(dh, Math.abs(b - t), Math.abs(b + p / 2 - t)); }
+    nt++;
+    if (d <= 0.12 * p) nb++;
+    if (dh <= 0.12 * p) nh++;
+  });
+});
+console.log(`vicino ai battiti (${nt} cambi, +-0,12 battiti): battito ${(100 * nb / nt).toFixed(0)}%  battito o mezzo battito ${(100 * nh / nt).toFixed(0)}%`);
