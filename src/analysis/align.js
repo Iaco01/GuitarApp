@@ -15,6 +15,9 @@ import { runSteps } from './steps.js';
 const G_CHROMA = 15;
 const G_BASS = 2.5;
 const COS_EPS = 0.3;
+const GAP_START = 4;
+const GAP_FRAME = 1;
+const MARGIN_SHIFTS = [0.25, 0.5, 1];
 
 const mod12 = (n) => ((n % 12) + 12) % 12;
 
@@ -128,15 +131,23 @@ function cumulative(a, D, T) {
 }
 
 // Segmental Viterbi over boundaries on a grid of `stride` frames. Event j ends at boundary
-// u in [lo[j], hi[j]]; its length in grid units is in [dmin[j], dmax[j]]. Returns the end
-// boundary (in grid units) of every event, and the start of the first, with the total score.
-function viterbi({ cumE, T, chordOf, N, stride, lo, hi, dmin, dmax, expected, sigma, lambda, bonus, kappa }) {
+// u in [lo[j], hi[j]]; its length in grid units is in [dmin[j], dmax[j]]. Returns the start
+// and end boundary (in grid units) of every event, with the total score.
+// Music that is not in the sheet: where gapBefore[j] is set, event j may start after a gap that
+// follows the end of event j-1 (a neutral emission: it costs `gapStart` once and `gapFrame` per
+// frame; a running maximum keeps this linear in the number of boundaries).
+function viterbi({ cumE, cumG, T, chordOf, N, stride, lo, hi, dmin, dmax, expected, sigma, lambda, bonus, kappa, gapBefore = null, gapStart = 0 }) {
   const U = Math.floor(T / stride);
   const Tp = T + 1;
   const back = new Int16Array(N * (U + 1)).fill(-1);
+  const gbits = gapBefore ? new Uint8Array(N * (U + 1)) : null; // bit 0: starts after a gap; bit 1: the gap extends the one ending at u-1
   let prev = new Float64Array(U + 1);
   let cur = new Float64Array(U + 1);
-  for (let u = 0; u <= U; u++) prev[u] = kappa * (bonus ? bonus[u * stride] : 0);
+  const start = new Float64Array(U + 1);
+  // frames outside the events (before the first, after the last, between sections) score like the best chord
+  // of the sheet minus gapFrame: the music not in the sheet is neither rewarded nor punished by the sheet's chords
+  const gcum = (u) => cumG[u * stride];
+  for (let u = 0; u <= U; u++) prev[u] = kappa * (bonus ? bonus[u * stride] : 0) + gcum(u);
   for (let j = 0; j < N; j++) {
     cur.fill(-Infinity);
     const c = chordOf[j];
@@ -148,6 +159,22 @@ function viterbi({ cumE, T, chordOf, N, stride, lo, hi, dmin, dmax, expected, si
       const r = Math.log((d * stride) / expected[j]);
       pen[d - dlo] = (lambda * r * r) / (2 * sigma * sigma);
     }
+    let from = prev;
+    if (j > 0 && gapBefore && gapBefore[j]) {
+      let gg = -Infinity;
+      for (let u = 0; u <= U; u++) {
+        let flags = 0;
+        if (u > 0) {
+          const st = prev[u - 1] - gapStart;
+          if (gg >= st) flags |= 2;
+          else gg = st;
+          gg += gcum(u) - gcum(u - 1);
+        }
+        if (gg > prev[u]) { start[u] = gg; flags |= 1; } else start[u] = prev[u];
+        gbits[j * (U + 1) + u] = flags;
+      }
+      from = start;
+    }
     const last = j === N - 1;
     for (let u = lo[j]; u <= Math.min(U, hi[j]); u++) {
       let best = -Infinity;
@@ -155,7 +182,7 @@ function viterbi({ cumE, T, chordOf, N, stride, lo, hi, dmin, dmax, expected, si
       for (let d = dlo; d <= dhi; d++) {
         const u0 = u - d;
         if (u0 < 0) break;
-        const fp = prev[u0];
+        const fp = from[u0];
         if (fp === -Infinity) continue;
         const seg = base >= 0 ? cumE[base + u * stride] - cumE[base + u0 * stride] : 0;
         const v = fp + seg - pen[d - dlo];
@@ -170,15 +197,25 @@ function viterbi({ cumE, T, chordOf, N, stride, lo, hi, dmin, dmax, expected, si
   }
   let bu = -1;
   let bv = -Infinity;
-  for (let u = 0; u <= U; u++) if (prev[u] > bv) { bv = prev[u]; bu = u; }
+  for (let u = 0; u <= U; u++) {
+    const v = prev[u] + gcum(U) - gcum(u);
+    if (v > bv) { bv = v; bu = u; }
+  }
   if (bu < 0) return null;
   const ends = new Int32Array(N);
+  const starts = new Int32Array(N);
   let u = bu;
   for (let j = N - 1; j >= 0; j--) {
     ends[j] = u;
     u -= back[j * (U + 1) + u];
+    starts[j] = u;
+    if (gbits && (gbits[j * (U + 1) + u] & 1)) {
+      // walk back over the gap: it began right after the end of event j-1
+      while (gbits[j * (U + 1) + u] & 2) u--;
+      u--;
+    }
   }
-  return { ends, start0: u, score: bv, stride };
+  return { ends, starts, start0: starts[0], score: bv, stride };
 }
 
 // Local seconds-per-prior-beat of every event (median of d / prior over +-`half` neighbours).
@@ -258,6 +295,9 @@ export function* alignEventsSteps(feat, events, options = {}) {
   const T = feat.frames;
   const priorBeats = events.map((e) => (e.priorBeats > 0 ? e.priorBeats : 4));
   const rest = events.map((e) => !!e.rest);
+  // music not in the sheet may sit between two sections (events carry `section`)
+  const gapBefore = new Uint8Array(N);
+  if (options.gaps !== false) for (let j = 1; j < N; j++) if (events[j].section !== undefined && events[j].section !== events[j - 1].section) gapBefore[j] = 1;
   const chordSet = buildChordSet(events);
   let bonus = options.onset ? boundaryBonus(options.onset, feat.onsetFps, fps, T, 0.06, 6) : null;
   if (options.gridBonus) {
@@ -267,7 +307,7 @@ export function* alignEventsSteps(feat, events, options = {}) {
   }
   const kappa = options.kappa ?? 0.5;
   const sumPrior = priorBeats.reduce((a, b) => a + b, 0);
-  const s0 = (T * 0.95) / sumPrior; // frames per prior beat, whole recording
+  const s0 = ((T * 0.95) / sumPrior); // frames per prior beat, whole recording
 
   const total = (options.candidates ?? 3) + 1 + 3; // runs, upper bound (progress only)
   let done = 0;
@@ -276,10 +316,18 @@ export function* alignEventsSteps(feat, events, options = {}) {
     const em = emissions(feat, chordSet.chords, shift, options.gChroma ?? G_CHROMA, options.gBass ?? G_BASS);
     yield;
     const cumE = cumulative(em.em, em.D, T);
+    const cumG = new Float64Array(T + 1);
+    for (let t = 0; t < T; t++) {
+      let m = -Infinity;
+      for (let c = 0; c < em.D; c++) if (em.em[c * T + t] > m) m = em.em[c * T + t];
+      cumG[t + 1] = cumG[t] + (Number.isFinite(m) ? Math.max(0, m - (options.gapFrame ?? GAP_FRAME)) : 0);
+    }
     yield;
     let scales = new Float64Array(N).fill(s0);
     let res = null;
     let strideNow = 2;
+    let lastExpected = null;
+    let lastSigma = 1;
     for (const st of stages) {
       const stride = st.stride;
       const U = Math.floor(T / stride);
@@ -294,22 +342,28 @@ export function* alignEventsSteps(feat, events, options = {}) {
         dmin[j] = Math.max(1, Math.floor((st.dminF * m) / stride));
         dmax[j] = Math.max(dmin[j] + 1, Math.ceil((st.dmaxF * m) / stride));
         if (res && st.band) {
+          // the previous path must stay feasible inside the band
+          const dp = ((res.ends[j] - res.starts[j]) * res.stride) / stride;
+          dmin[j] = Math.max(1, Math.min(dmin[j], Math.floor(dp)));
+          dmax[j] = Math.max(dmax[j], Math.ceil(dp));
           const centre = (res.ends[j] * res.stride) / stride;
           const w = (st.band * fps) / stride;
           lo[j] = Math.max(0, Math.floor(centre - w));
           hi[j] = Math.min(U, Math.ceil(centre + w));
         }
       }
-      const r = viterbi({ cumE, T, chordOf: chordSet.chordOf, N, stride, lo, hi, dmin, dmax, expected, sigma: st.sigma, lambda: options.lambda ?? 8, bonus, kappa });
+      const r = viterbi({ cumE, cumG, T, chordOf: chordSet.chordOf, N, stride, lo, hi, dmin, dmax, expected, sigma: st.sigma, lambda: options.lambda ?? 8, bonus, kappa, gapBefore, gapStart: options.gapStart ?? GAP_START });
       if (!r) return null;
       res = r;
       strideNow = stride;
-      const durs = Array.from(res.ends, (e, j) => (e - (j ? res.ends[j - 1] : res.start0)) * stride);
+      lastExpected = expected;
+      lastSigma = st.sigma;
+      const durs = Array.from(res.ends, (e, j) => (e - res.starts[j]) * stride);
       scales = localScales(durs, priorBeats, rest, 6, s0);
       step();
       yield;
     }
-    return { res, em, cumE, scales, stride: strideNow };
+    return { res, em, cumE, cumG, scales, stride: strideNow, expected: lastExpected, sigma: lastSigma };
   };
 
   let shifts;
@@ -339,20 +393,19 @@ export function* alignEventsSteps(feat, events, options = {}) {
   if (!fin) return null;
   const { res } = fin;
   const stride = res.stride;
-  const boundaryFrame = new Float64Array(N + 1);
-  boundaryFrame[0] = res.start0 * stride;
-  for (let j = 0; j < N; j++) boundaryFrame[j + 1] = res.ends[j] * stride;
-  const bt = Array.from(boundaryFrame, (f) => Math.max(0, (f - 0.5) / fps));
-  const startSec = bt.slice(0, N);
-  const endSec = bt.slice(1);
+  const toSec = (u) => Math.max(0, (u * stride - 0.5) / fps);
+  const startSec = Array.from(res.starts, toSec);
+  const endSec = Array.from(res.ends, toSec);
+  const startFrame = Array.from(res.starts, (u) => u * stride);
+  const endFrame = Array.from(res.ends, (u) => u * stride);
   // confidence per event
   const cumCos = cumulative(fin.em.cos, fin.em.D, T);
   const Tp = T + 1;
   const confidence = new Float64Array(N);
   for (let j = 0; j < N; j++) {
     const c = chordSet.chordOf[j];
-    const a = boundaryFrame[j];
-    const b = boundaryFrame[j + 1];
+    const a = startFrame[j];
+    const b = endFrame[j];
     if (c < 0 || b - a < 1) { confidence[j] = 0.3; continue; }
     const mean = (cc) => (cumCos[cc * Tp + b] - cumCos[cc * Tp + a]) / (b - a);
     const own = mean(c);
@@ -363,7 +416,39 @@ export function* alignEventsSteps(feat, events, options = {}) {
     if (same(j - 1) || same(j + 1)) conf *= 0.6;
     confidence[j] = conf;
   }
-  return { startSec, endSec, confidence, shift, shiftMargin, score: res.score, scales: fin.scales, chordSet, features: null };
+  // sharpness of every start boundary: how much worse the path gets when that change is moved by
+  // +-0.25 / 0.5 / 1 s (the two events around it keep their other end), per frame of displacement
+  const lambda = options.lambda ?? 8;
+  const penOf = (j, d) => (d < 1 ? Infinity : (lambda * Math.log(d / fin.expected[j]) ** 2) / (2 * fin.sigma * fin.sigma));
+  const segOf = (j, a, b) => (chordSet.chordOf[j] >= 0 ? fin.cumE[chordSet.chordOf[j] * Tp + b] - fin.cumE[chordSet.chordOf[j] * Tp + a] : 0);
+  const sharpness = new Float64Array(N);
+  for (let j = 0; j < N; j++) {
+    const b0 = startFrame[j];
+    const coupled = j > 0 && startFrame[j] - endFrame[j - 1] <= 0; // no gap before: the previous event stretches too
+    const S = (b) => {
+      let v = segOf(j, b, endFrame[j]) - penOf(j, endFrame[j] - b) + (kappa * (bonus ? bonus[b] : 0));
+      if (coupled) v += segOf(j - 1, startFrame[j - 1], b) - penOf(j - 1, b - startFrame[j - 1]);
+      return v;
+    };
+    const lowLimit = coupled ? startFrame[j - 1] + 1 : Math.max(0, b0 - Math.ceil(fps * 1.5));
+    const highLimit = endFrame[j] - 1;
+    const base = S(b0);
+    const ms = [];
+    for (const dsec of MARGIN_SHIFTS) {
+      const df = Math.round(dsec * fps);
+      for (const sg of [-1, 1]) {
+        const b = b0 + sg * df;
+        if (b < lowLimit || b > highLimit) continue;
+        const v = S(b);
+        if (Number.isFinite(v)) ms.push((base - v) / df);
+      }
+    }
+    ms.sort((a, c) => a - c);
+    sharpness[j] = ms.length ? Math.max(0, ms[ms.length >> 1]) : 0;
+  }
+  const gaps = [];
+  for (let j = 1; j < N; j++) if ((res.starts[j] - res.ends[j - 1]) * stride >= fps) gaps.push({ before: j, startSec: endSec[j - 1], endSec: startSec[j] });
+  return { startSec, endSec, confidence, sharpness, gaps, shift, shiftMargin, score: res.score, scales: fin.scales, chordSet, features: null };
 }
 
 // Moves every boundary to the strongest onset within +-win seconds (if strong enough). The

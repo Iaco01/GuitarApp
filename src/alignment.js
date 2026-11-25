@@ -42,6 +42,8 @@ export function makeAlignment(result, song, createdAt = new Date().toISOString()
     names: refs.map((e) => e.name),
     endSec: r3(Math.max(endSec, result.eventStartSec[N - 1] + 0.2)),
     eventBeats: (result.eventBeats || []).map((b) => (Number.isFinite(b) ? b : null)),
+    // music that is not in the sheet (a repeat, a solo...) between the end of event before-1 and the start of `before`
+    gaps: (result.gaps || []).filter((g) => g.endSec - g.startSec >= 1).map((g) => ({ before: g.before, startSec: r3(g.startSec), endSec: r3(g.endSec) })),
     sections: song.sections.map((_, si) => {
       const s = result.sections[si] || {};
       const i0 = idx[si][0];
@@ -76,6 +78,7 @@ export function normalizeAlignment(raw) {
     names: Array.isArray(raw.names) && raw.names.length === N ? raw.names.map((n) => String(n).slice(0, 20)) : null,
     endSec: Number.isFinite(raw.endSec) && raw.endSec > last ? raw.endSec : last + 2,
     eventBeats: Array.isArray(raw.eventBeats) && raw.eventBeats.length === N ? raw.eventBeats.map((b) => (Number.isFinite(b) && b >= 1 ? Math.round(b) : null)) : new Array(N).fill(null),
+    gaps: Array.isArray(raw.gaps) ? raw.gaps.filter((g) => g && Number.isInteger(g.before) && g.before >= 1 && g.before < N && Number.isFinite(g.startSec) && Number.isFinite(g.endSec) && g.endSec >= g.startSec && g.startSec >= raw.eventStartSec[g.before - 1] && g.endSec <= raw.eventStartSec[g.before] + 1e-6).map((g) => ({ before: g.before, startSec: g.startSec, endSec: g.endSec })) : [],
     sections: raw.sections.map((s) => ({
       startSec: s && Number.isFinite(s.startSec) ? s.startSec : null,
       bpm: s && Number.isFinite(s.bpm) ? s.bpm : null,
@@ -116,17 +119,33 @@ export function countVerified(alignment) {
 // Event times seen by the timeline: the aligned ones plus the global shift, with the manual anchors
 // of sections 1.. on top. An anchored section starts exactly at its anchor; its events are stretched
 // between the anchor and the (possibly also anchored) start of the next section, so nothing overlaps.
-// Returns { starts[], endSec, warnings }.
+// Returns { starts[], ends[], endSec, gaps[], warnings }: `ends[j]` is where event j stops sounding (the start of
+// the next one, or the start of a stretch of music not in the sheet), `gaps` the stretches [{ startSec, endSec }].
 export function effectiveEventTimes(song, alignment, anchors = null) {
   const shift = alignment.shiftSec || 0;
   const starts = alignment.eventStartSec.map((t) => t + shift);
+  const gapEndOf = new Map((alignment.gaps || []).map((g) => [g.before - 1, g]));
   const endLast = alignment.endSec + shift;
   const warnings = [];
   const idx = sectionEventIndices(song);
   const secs = [];
   idx.forEach((list, si) => { if (list.length) secs.push({ si, i0: list[0], i1: list[list.length - 1] }); });
   const hasAnchors = anchors && secs.some((m) => m.si > 0 && Number.isFinite(anchors[m.si]));
-  if (!hasAnchors) return { starts, endSec: endLast, warnings };
+  const finish = (endSec) => {
+    const ends = starts.map((t, j) => (j + 1 < starts.length ? starts[j + 1] : endSec));
+    const gaps = [];
+    gapEndOf.forEach((g, j) => {
+      if (!(j + 1 < starts.length)) return;
+      // the gap keeps its proportions inside the span between the (possibly moved) event j and j+1
+      const o0 = alignment.eventStartSec[j] + shift;
+      const o1 = alignment.eventStartSec[j + 1] + shift;
+      const f = o1 > o0 ? (starts[j + 1] - starts[j]) / (o1 - o0) : 1;
+      const a = starts[j] + (g.startSec + shift - o0) * f;
+      if (a > starts[j] && a < starts[j + 1]) { ends[j] = a; gaps.push({ startSec: a, endSec: starts[j + 1] }); }
+    });
+    return { starts, ends, endSec, gaps, warnings };
+  };
+  if (!hasAnchors) return finish(endLast);
   const bOld = secs.map((m) => starts[m.i0]).concat([endLast]);
   const bNew = bOld.slice();
   secs.forEach((m, k) => {
@@ -146,7 +165,7 @@ export function effectiveEventTimes(song, alignment, anchors = null) {
     const f = o1 > o0 ? (n1 - n0) / (o1 - o0) : 1;
     for (let j = m.i0; j <= m.i1; j++) starts[j] = n0 + (starts[j] - o0) * f;
   });
-  return { starts, endSec: bNew[secs.length], warnings };
+  return finish(bNew[secs.length]);
 }
 
 // Replaces the start times of the events of section `si` (e.g. from the taps of "Correggi a orecchio").

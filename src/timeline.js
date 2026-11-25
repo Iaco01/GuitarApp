@@ -112,7 +112,7 @@ export function buildTimeline(song, { speed = 1, anchors = null, alignment = nul
 }
 
 function buildAlignedTimeline(song, alignment, anchors, bpms, perBar) {
-  const { starts, endSec, warnings } = effectiveEventTimes(song, alignment, anchors);
+  const { starts, ends, endSec, gaps, warnings } = effectiveEventTimes(song, alignment, anchors);
   const N = starts.length;
   const events = [];
   const beats = [];
@@ -128,7 +128,7 @@ function buildAlignedTimeline(song, alignment, anchors, bpms, perBar) {
         const n = Math.max(1, Math.round(Number(c.beats) || 1));
         const rel = beatCursor - startBeat;
         const start = starts[k];
-        const end = k + 1 < N ? starts[k + 1] : endSec;
+        const end = ends[k];
         const dur = Math.max(end - start, 1e-3);
         const spb = dur / n;
         const eventIndex = events.length;
@@ -142,14 +142,14 @@ function buildAlignedTimeline(song, alignment, anchors, bpms, perBar) {
     });
     const count = beatCursor - startBeat;
     const secStart = k > first ? starts[first] : prevEnd;
-    const secEnd = k > first ? (k < N ? starts[k] : endSec) : prevEnd;
+    const secEnd = k > first ? ends[k - 1] : prevEnd;
     prevEnd = secEnd;
     const dur = Math.max(secEnd - secStart, 1e-3);
     const spb = count > 0 ? dur / count : 60 / bpms[si];
     const bpm = 60 / spb;
     sections.push({ index: si, startSec: secStart, endSec: secEnd, startBeat, endBeat: beatCursor, bpm, savedBpm: bpms[si], scale: bpms[si] / bpm, spb, anchored: !!(anchors && si > 0 && Number.isFinite(anchors[si])), aligned: true });
   });
-  return { events, beats, sections, totalBeats: beatCursor, totalSec: endSec, speed: 1, warnings, aligned: true };
+  return { events, beats, sections, totalBeats: beatCursor, totalSec: endSec, speed: 1, warnings, aligned: true, gaps };
 }
 
 // Greatest index i with list[i][key] <= value, or -1.

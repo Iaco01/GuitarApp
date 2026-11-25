@@ -124,7 +124,9 @@ export function* analyseAndAlignSteps({ samples, sampleRate, song, onProgress = 
         pendingBeats.push({ idx, bpm });
       }
     });
-    for (let j = 0; j < N; j++) endSec[j] = j + 1 < N ? startSec[j + 1] : endSec[j];
+    // an event that precedes music not in the sheet ends where that music starts
+    const gapEnd = new Map((a0.gaps || []).map((g) => [g.before - 1, g.startSec]));
+    for (let j = 0; j < N; j++) endSec[j] = j + 1 < N ? (gapEnd.has(j) ? Math.min(startSec[j + 1], Math.max(startSec[j], gapEnd.get(j))) : startSec[j + 1]) : endSec[j];
     for (const { idx, bpm } of pendingBeats) for (const j of idx) eventBeats[j] = Math.max(1, Math.round(((endSec[j] - startSec[j]) * bpm) / 60));
     sections.forEach((s, i) => {
       const e = events.map((ev, j) => (ev.section === i ? j : -1)).filter((j) => j >= 0);
@@ -138,8 +140,10 @@ export function* analyseAndAlignSteps({ samples, sampleRate, song, onProgress = 
     eventStartSec: startSec,
     eventEndSec: endSec,
     confidence: Array.from(al.confidence),
+    sharpness: Array.from(al.sharpness),
     sections,
     eventBeats,
+    gaps: (al.gaps || []).map((g) => ({ before: g.before, startSec: endSec[g.before - 1], endSec: startSec[g.before] })).filter((g) => g.endSec - g.startSec >= 1),
     transposeFound: wrapSemis(al.shift),
     transposeMargin: al.shiftMargin,
     tuningCents: feat.tuningCents,
