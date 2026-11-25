@@ -3,7 +3,9 @@
 
 import { effectiveSectionBpms } from './model.js';
 
-export const SYNC_BPM_TOLERANCE = 0.3;
+// A tempo suggestion needs a timing error above both limits (a tap is never more precise than this).
+export const SYNC_ERR_MIN_SEC = 0.15;
+export const SYNC_ERR_REL = 0.003;
 export const LATENCY_MIN_MS = -100;
 export const LATENCY_MAX_MS = 400;
 
@@ -64,11 +66,13 @@ export function removeAnchor(audio, sectionIndex) {
 
 const round1 = (v) => Math.round(v * 10) / 10;
 
-// BPM that the audio implies between consecutive anchors (the offset counts as the anchor of section 0;
-// `audio.endSec`, if set, closes the last interval). A suggestion is returned for every interval whose
-// implied tempo differs from the effective one by more than SYNC_BPM_TOLERANCE:
-// { from, to (sections, inclusive), beats, seconds, suggested, current }.
-export function suggestSectionBpms(song, audio, tolerance = SYNC_BPM_TOLERANCE) {
+// Compares the length of every stretch between consecutive anchors (the offset counts as the anchor of
+// section 0; `audio.endSec`, if set, closes the last stretch) with the length the saved tempos give it.
+// A suggestion is returned when |t2 - t1 - expected| > max(SYNC_ERR_MIN_SEC, SYNC_ERR_REL * expected):
+// { from, to (sections, inclusive), beats, seconds, expected, factor, suggested, current } where
+// factor = expected / seconds multiplies the tempo of every section of the stretch, and
+// current / suggested are the beat-weighted mean tempo before / after.
+export function suggestSectionBpms(song, audio) {
   if (!audio) return [];
   const bpms = effectiveSectionBpms(song);
   const beatsOf = song.sections.map((s) => {
@@ -90,26 +94,28 @@ export function suggestSectionBpms(song, audio, tolerance = SYNC_BPM_TOLERANCE) 
     const b = stops[i + 1];
     const to = b.section - 1;
     let beats = 0;
-    let natural = 0;
+    let expected = 0;
     for (let s = a.section; s <= to; s++) {
       beats += beatsOf[s];
-      natural += (beatsOf[s] * 60) / bpms[s];
+      expected += (beatsOf[s] * 60) / bpms[s];
     }
     const seconds = b.t - a.t;
     if (beats <= 0 || seconds <= 0) continue;
-    const suggested = (beats / seconds) * 60;
-    const current = (beats / natural) * 60;
-    if (Math.abs(suggested - current) > tolerance) {
-      out.push({ from: a.section, to, beats, seconds, suggested: round1(suggested), current: round1(current) });
+    if (Math.abs(seconds - expected) > Math.max(SYNC_ERR_MIN_SEC, SYNC_ERR_REL * expected)) {
+      const factor = expected / seconds;
+      const current = (beats / expected) * 60;
+      out.push({ from: a.section, to, beats, seconds, expected, factor, suggested: round1(current * factor), current: round1(current) });
     }
   }
   return out;
 }
 
-// Writes a suggestion into the sections it covers (flattening their tempo to the suggested one).
+// Makes the correction permanent: every section of the stretch gets its tempo times the same factor
+// (rounded to 0.1), so the ratios between sections stay what they were.
 export function applyBpmSuggestion(song, suggestion) {
+  const bpms = effectiveSectionBpms(song);
   for (let s = suggestion.from; s <= suggestion.to; s++) {
-    song.sections[s].bpm = suggestion.suggested;
+    song.sections[s].bpm = Math.min(300, Math.max(30, round1(bpms[s] * suggestion.factor)));
     song.sections[s].bpmSource = 'edited';
   }
 }

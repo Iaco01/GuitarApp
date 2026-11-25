@@ -28,9 +28,10 @@ export function usableAnchors(anchors, sectionCount) {
 }
 
 // `anchors` ({ [sectionIndex]: sec }) pins sections to instants of the audio: an anchored section
-// starts exactly there and the following ones continue from it with their own tempo. Between two
-// anchors, if the sections would run past the next anchor they are compressed to end there (the
-// tempo they imply is higher); if they end earlier there is a gap. Without anchors: round 2 times.
+// starts exactly there. Between two consecutive anchors the sections are scaled uniformly (one factor,
+// same for all of them) so that they fill the stretch exactly: no gap, no jump. After the last anchor
+// the saved tempos apply. Without anchors: round 2 times. Each timeline section reports the effective
+// `bpm` (scaled) and the saved one as `savedBpm`.
 export function buildTimeline(song, { speed = 1, anchors = null } = {}) {
   const sp = speed > 0 ? speed : 1;
   const bpms = effectiveSectionBpms(song);
@@ -42,18 +43,17 @@ export function buildTimeline(song, { speed = 1, anchors = null } = {}) {
     for (const l of sec.lines) for (const c of l.chords) n += Math.max(1, Math.round(Number(c.beats) || 1));
     return n * (60 / bpms[si] / sp);
   });
-  // scale of each section: runs between anchors that overflow the next anchor are squeezed
+  // scale of each section: the stretch between two anchors is filled exactly
   const scale = song.sections.map(() => 1);
   let from = 0;
   let start = 0;
-  const squeeze = (to, end) => {
+  const fit = (to, end) => {
     let total = 0;
     for (let i = from; i < to; i++) total += nat[i];
-    const room = end - start;
-    if (total > room + 1e-9) for (let i = from; i < to; i++) scale[i] = Math.max(room, 0) / total;
+    if (total > 0) for (let i = from; i < to; i++) scale[i] = Math.max(end - start, 1e-6) / total;
   };
   for (const [k, sec] of valid) {
-    if (k > from) squeeze(k, sec);
+    if (k > from) fit(k, sec);
     from = k;
     start = sec;
   }
@@ -82,7 +82,7 @@ export function buildTimeline(song, { speed = 1, anchors = null } = {}) {
           beats: n,
           startSec: startSec + rel * spb,
           durSec: n * spb,
-          bpm,
+          bpm: bpm / scale[si],
         });
         for (let b = 0; b < n; b++) {
           beats.push({
@@ -99,7 +99,7 @@ export function buildTimeline(song, { speed = 1, anchors = null } = {}) {
     });
     const count = beatCursor - startBeat;
     secCursor = startSec + count * spb;
-    sections.push({ index: si, startSec, endSec: secCursor, startBeat, endBeat: beatCursor, bpm, spb, anchored: valid.has(si) });
+    sections.push({ index: si, startSec, endSec: secCursor, startBeat, endBeat: beatCursor, bpm: bpm / scale[si], savedBpm: bpm, scale: scale[si], spb, anchored: valid.has(si) });
   });
   return { events, beats, sections, totalBeats: beatCursor, totalSec: secCursor, speed: sp, warnings };
 }

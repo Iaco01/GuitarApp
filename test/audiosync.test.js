@@ -17,11 +17,11 @@ const demo = () => createSong({
 const audioOf = (over = {}) => ({ fileName: 'a.mp3', size: 10, durationSec: 30, offsetSec: 1.7, anchors: {}, metronome: false, ...over });
 
 test('anchors: sections start from their anchor, the others follow with their own tempo', () => {
-  const t = buildTimeline(demo(), { anchors: { 0: 1.7, 2: 20 } });
-  assert.deepEqual(t.sections.map((s) => [s.startSec, s.endSec, s.anchored]), [[1.7, 9.7, true], [9.7, 13.7, false], [20, 28, true]]);
+  const t = buildTimeline(demo(), { anchors: { 0: 1.7, 2: 13.7 } });
+  assert.deepEqual(t.sections.map((s) => [s.startSec, s.endSec, s.anchored]), [[1.7, 9.7, true], [9.7, 13.7, false], [13.7, 21.7, true]]);
   assert.equal(t.events[0].startSec, 1.7);
   assert.equal(t.events[2].startSec, 9.7);
-  assert.equal(t.events[4].startSec, 20);
+  assert.equal(t.events[4].startSec, 13.7);
   assert.equal(t.beats[8].timeSec, 9.7);
   assert.deepEqual(t.warnings, []);
 });
@@ -43,16 +43,19 @@ test('anchors: non increasing or impossible anchors are ignored with a warning',
   assert.equal(u.sections[2].startSec, 10 + 4);
 });
 
-test('anchors: sections that would overflow the next anchor are squeezed to end there; gaps stay', () => {
-  const t = buildTimeline(demo(), { anchors: { 0: 0, 1: 6 } }); // A needs 8 s but has 6
-  assert.equal(t.sections[0].endSec, 6);
-  assert.ok(t.events[1].startSec < 6 && t.events[1].startSec > 2);
-  assert.equal(t.sections[1].startSec, 6);
-  const gap = buildTimeline(demo(), { anchors: { 0: 0, 1: 12 } });
-  assert.equal(gap.sections[0].endSec, 8);
-  assert.equal(gap.sections[1].startSec, 12);
-  // times stay monotonic
-  for (const x of [t, gap]) for (let i = 1; i < x.events.length; i++) assert.ok(x.events[i].startSec >= x.events[i - 1].startSec);
+test('anchors: the stretch between two anchors is filled exactly, squeezed or stretched, ratios kept', () => {
+  const sq = buildTimeline(demo(), { anchors: { 0: 0, 2: 9 } }); // A+B need 12 s but have 9
+  const st = buildTimeline(demo(), { anchors: { 0: 0, 2: 18 } }); // ... or have 18
+  for (const [t, k] of [[sq, 0.75], [st, 1.5]]) {
+    assert.ok(Math.abs(t.sections[1].endSec - t.sections[2].startSec) < 1e-9);
+    assert.ok(Math.abs(t.sections[0].scale - k) < 1e-9 && Math.abs(t.sections[1].scale - k) < 1e-9);
+    assert.equal(t.sections[0].savedBpm, 60);
+    assert.ok(Math.abs(t.sections[0].bpm - 60 / k) < 1e-9 && Math.abs(t.sections[1].bpm - 120 / k) < 1e-9);
+    assert.equal(t.sections[2].scale, 1); // after the last anchor: saved tempos
+    for (let i = 1; i < t.events.length; i++) assert.ok(t.events[i].startSec >= t.events[i - 1].startSec);
+  }
+  // an event's tempo is the effective one too
+  assert.ok(Math.abs(sq.events[0].bpm - 80) < 1e-9);
 });
 
 test('audioAnchors puts the offset on section 0', () => {
@@ -77,32 +80,31 @@ test('setAnchor keeps anchors ordered and removeAnchor drops them', () => {
 });
 
 test('BPM suggestion between two anchors and up to the end of the song', () => {
-  const s = demo(); // current 60 / 120 / 60
-  // A: 8 beats in 7.9 s (60.8 BPM) -> suggestion; B+C: 16 beats ...
-  const audio = audioOf({ offsetSec: 0, anchors: { 1: 7.9, 2: 11.9 }, endSec: 19.9 });
+  const s = demo(); // current 60 / 120 / 60, 8 s / 4 s / 8 s
+  // A: 8 beats in 7.5 s -> error 0.5 s, suggestion
+  const audio = audioOf({ offsetSec: 0, anchors: { 1: 7.5, 2: 11.5 }, endSec: 19.5 });
   const sug = suggestSectionBpms(s, audio);
   assert.equal(sug.length, 1);
   assert.deepEqual([sug[0].from, sug[0].to, sug[0].beats], [0, 0, 8]);
-  assert.equal(sug[0].suggested, 60.8);
+  assert.equal(sug[0].suggested, 64);
   assert.equal(sug[0].current, 60);
-  // within tolerance: nothing
-  assert.deepEqual(suggestSectionBpms(s, audioOf({ offsetSec: 0, anchors: { 1: 8, 2: 12 }, endSec: 20 })), []);
-  // a pair of sections between two anchors, current tempo is the weighted one
-  const two = suggestSectionBpms(s, audioOf({ offsetSec: 0, anchors: { 2: 10 } }));
+  // within tolerance (0.1 s late): nothing
+  assert.deepEqual(suggestSectionBpms(s, audioOf({ offsetSec: 0, anchors: { 1: 8.1, 2: 12.1 }, endSec: 20.1 })), []);
+  // a pair of sections between two anchors: one factor for both
+  const two = suggestSectionBpms(s, audioOf({ offsetSec: 0, anchors: { 2: 10.5 } }));
   assert.equal(two.length, 1);
   assert.deepEqual([two[0].from, two[0].to, two[0].beats], [0, 1, 16]);
-  assert.equal(two[0].suggested, 96);
+  assert.equal(two[0].factor, 12 / 10.5);
   assert.equal(two[0].current, 80);
   // without the end of the song the last interval has no suggestion
   assert.deepEqual(suggestSectionBpms(s, audioOf({ offsetSec: 0 })), []);
   applyBpmSuggestion(s, two[0]);
-  assert.deepEqual(s.sections.map((x) => [x.bpm, x.bpmSource]), [[96, 'edited'], [96, 'edited'], [60, 'edited']]);
-  assert.equal(suggestSectionBpms(s, audioOf({ offsetSec: 0, anchors: { 2: 10 } })).length, 0);
+  assert.deepEqual(s.sections.map((x) => [x.bpm, x.bpmSource]), [[68.6, 'edited'], [137.1, 'edited'], [60, 'edited']]);
 });
 
 test('BPM suggestion handles a decimal tempo like 141.5', () => {
-  const s = createSong({ bpm: 142, sections: [sec('V', 142, [chords(['G', 'D', 'Em', 'C'], 4)])] });
-  const beats = 16;
+  const s = createSong({ bpm: 142, sections: [sec('V', 142, Array.from({ length: 9 }, () => chords(['G', 'D', 'Em', 'C'], 4)))] });
+  const beats = 144;
   const sec2 = (beats / 141.5) * 60;
   const sug = suggestSectionBpms(s, { offsetSec: 2, anchors: {}, endSec: 2 + sec2 });
   assert.equal(sug[0].suggested, 141.5);
