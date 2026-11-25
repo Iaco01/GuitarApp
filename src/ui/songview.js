@@ -129,7 +129,11 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
     }
     gapp.timeline = timeline;
     mapRefs();
+    paintBpmLock();
   }
+  // times that come from the audio alignment do not follow the BPM: the panel buttons are off
+  function bpmLocked() { return player === audioPlayer && !!audioPlayer && !!timeline.aligned; }
+  function paintBpmLock() { if (panel) panel.setBpmLocked(bpmLocked()); }
 
   // ---- audio file: load from IndexedDB, switch between metronome and audio ----
   function destroyAudioPlayer() {
@@ -739,8 +743,12 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
       lastKey = '';
     },
     bpmScope: song.view.bpmScope === 'section' ? 'section' : 'all',
-    onBpmStep: (dir) => stepBpm(dir),
+    onBpmStep: (dir) => { if (!bpmLocked()) stepBpm(dir); },
     onBpmSet: (v) => {
+      if (bpmLocked()) {
+        showError('Con la sincronizzazione automatica il tempo segue l’audio: per correggere una sezione usa «Correggi a orecchio»');
+        return false;
+      }
       if (!(v >= BPM_MIN && v <= BPM_MAX)) {
         showError(`Inserisci un BPM tra ${BPM_MIN} e ${BPM_MAX}`);
         return false;
@@ -780,6 +788,7 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
       persist();
     },
   });
+  paintBpmLock();
 
   // ---- duration editing ----
   const editInfo = domEl('div', { class: 'eb-info', id: 'eb-info' }, 'Tocca un accordo per cambiarne i battiti');

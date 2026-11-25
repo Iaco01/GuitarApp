@@ -94,6 +94,8 @@ export function createPlayPanel(song, { onLoopExit = null, onPlayPause, onStop, 
   const bpmNoteText = domEl('span', { id: 'pp-bpm-note-text' }, '');
   const bpmNote = domEl('div', { class: 'pp-notice pp-bpmnote', id: 'pp-bpm-note', role: 'status', hidden: true }, bpmNoteText,
     domEl('button', { type: 'button', class: 'btn small', id: 'btn-bpm-undo', onclick: () => { if (onBpmUndo) onBpmUndo(); } }, 'Annulla'));
+  // with the automatic sync the times come from the audio: − / + stay visible but off, with this note
+  const lockNote = domEl('div', { class: 'pp-lock-note', id: 'pp-bpm-lock', hidden: true }, 'Con la sincronizzazione automatica il tempo segue l’audio: per correggere una sezione usa «Correggi a orecchio»');
   const patEl = domEl('div', { class: 'pp-pat', id: 'pp-pattern' });
 
   const playBtn = domEl('button', { type: 'button', class: 'btn primary pp-play', id: 'btn-play', 'aria-label': 'Avvia', onclick: onPlayPause }, 'Play');
@@ -176,6 +178,7 @@ export function createPlayPanel(song, { onLoopExit = null, onPlayPause, onStop, 
   const el = domEl('div', { class: 'playpanel', id: 'playpanel', role: 'region', 'aria-label': 'Riproduzione' },
     notice,
     bpmNote,
+    lockNote,
     domEl('div', { class: 'pp-row1' }, cur, next, playBtn),
     domEl('div', { class: 'pp-row2' }, dotsEl, bpmBox, scopeBtn, domEl('span', { class: 'pp-spacer' }), loopBadge, clickIcon, moreBtn),
     patEl,
@@ -255,6 +258,11 @@ export function createPlayPanel(song, { onLoopExit = null, onPlayPause, onStop, 
     setBpmNote(text) {
       bpmNoteText.textContent = text || '';
       bpmNote.hidden = !text;
+    },
+    setBpmLocked(locked) {
+      bpmMinus.disabled = bpmPlus.disabled = !!locked;
+      lockNote.hidden = !locked;
+      if (locked) bpmEdit.hidden = true;
     },
     setScope(v) {
       scope = v;
