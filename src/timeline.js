@@ -117,12 +117,14 @@ function buildAlignedTimeline(song, alignment, anchors, bpms, perBar) {
   const events = [];
   const beats = [];
   const sections = [];
+  const skippedSet = new Set(alignment.skipped || []);
   let beatCursor = 0;
   let k = 0;
   let prevEnd = 0;
   song.sections.forEach((sec, si) => {
     const startBeat = beatCursor;
     const first = k;
+    let present = 0;
     sec.lines.forEach((line, li) => {
       line.chords.forEach((c, ci) => {
         const n = Math.max(1, Math.round(Number(c.beats) || 1));
@@ -132,6 +134,13 @@ function buildAlignedTimeline(song, alignment, anchors, bpms, perBar) {
         const dur = Math.max(end - start, 1e-3);
         const spb = dur / n;
         const eventIndex = events.length;
+        if (skippedSet.has(k)) {
+          // not in the audio: no time, no beats (the metronome and the highlight pass over it)
+          events.push({ ref: `${si}.${li}.${ci}`, name: c.name, mark: c.mark || '', rest: !!c.rest, sectionIndex: si, startBeat: beatCursor, beats: 0, startSec: start, durSec: 0, bpm: 0, skipped: true });
+          k++;
+          return;
+        }
+        present++;
         events.push({ ref: `${si}.${li}.${ci}`, name: c.name, mark: c.mark || '', rest: !!c.rest, sectionIndex: si, startBeat: beatCursor, beats: n, startSec: start, durSec: dur, bpm: 60 / spb });
         for (let b = 0; b < n; b++) {
           beats.push({ index: beatCursor + b, timeSec: start + b * spb, spb, sectionIndex: si, eventIndex, beatInBar: (rel + b) % perBar, isDownbeat: (rel + b) % perBar === 0 });
@@ -141,13 +150,15 @@ function buildAlignedTimeline(song, alignment, anchors, bpms, perBar) {
       });
     });
     const count = beatCursor - startBeat;
-    const secStart = k > first ? starts[first] : prevEnd;
-    const secEnd = k > first ? ends[k - 1] : prevEnd;
+    const firstP = Array.from({ length: k - first }, (_, i) => first + i).find((i) => !skippedSet.has(i));
+    const lastP = Array.from({ length: k - first }, (_, i) => k - 1 - i).find((i) => !skippedSet.has(i));
+    const secStart = present ? starts[firstP] : prevEnd;
+    const secEnd = present ? ends[lastP] : prevEnd;
     prevEnd = secEnd;
     const dur = Math.max(secEnd - secStart, 1e-3);
     const spb = count > 0 ? dur / count : 60 / bpms[si];
     const bpm = 60 / spb;
-    sections.push({ index: si, startSec: secStart, endSec: secEnd, startBeat, endBeat: beatCursor, bpm, savedBpm: bpms[si], scale: bpms[si] / bpm, spb, anchored: !!(anchors && si > 0 && Number.isFinite(anchors[si])), aligned: true });
+    sections.push({ index: si, startSec: secStart, endSec: secEnd, startBeat, endBeat: beatCursor, bpm, savedBpm: bpms[si], scale: bpms[si] / bpm, spb, anchored: !!(anchors && si > 0 && Number.isFinite(anchors[si])), aligned: true, skipped: sec.lines.length > 0 && present === 0 && k > first });
   });
   return { events, beats, sections, totalBeats: beatCursor, totalSec: endSec, speed: 1, warnings, aligned: true, gaps };
 }
@@ -171,7 +182,10 @@ function lastAtOrBefore(list, key, value) {
 
 // Index of the chord event playing at `sec` (-1 before the start; the last one after the end).
 export function eventIndexAtTime(timeline, sec) {
-  return lastAtOrBefore(timeline.events, 'startSec', sec);
+  let i = lastAtOrBefore(timeline.events, 'startSec', sec);
+  // events that are not in the audio (the last ones of a sheet longer than the audio) are never the current one
+  while (i >= 0 && timeline.events[i].skipped) i--;
+  return i;
 }
 
 export function beatIndexAtTime(timeline, sec) {

@@ -9,9 +9,16 @@ export const CONF_YELLOW = 0.5;
 // without a stable beat the colour is yellow at most (the engine caps the confidence of those changes at 0.55)
 export const CONF_YELLOW_FREE = 0.4;
 const MIN_GAP_SEC = 0.05;
+// music not in the sheet shorter than this (a bar of passage the sheet does not write) is not a gap: the previous chord
+// simply lasts longer
+export const GAP_MIN_SEC = 3;
 // a transposition is proposed only if the best one beats the second best by this share of its score
 // (true recordings: 0.19-0.25 on the synthetic benches; noise, silence or another song: below 0.02)
 export const TRANSPOSE_MIN_RATIO = 0.1;
+// The same ratio tells the right song from noise or another song even when the audio is very noisy: it grows with the
+// noise for the right song (0.30-0.39 at -5..-12 dB white noise, 0.16 clean) and stays at 0.00-0.07 for white noise, silence
+// or another song. Above this the audio is recognised whatever the colours say (round 9; before: -5 dB was the limit).
+export const RECOGNISED_MATCH = 0.12;
 // the audio is not recognised when this share of the sections (with chords) is red
 export const NOT_RECOGNISED_RED = 0.75;
 
@@ -36,6 +43,14 @@ export function sectionEventIndices(song) {
   return out;
 }
 
+// How much the best transposition of the sheet beats the second best, relative to the score (null: not known).
+export function matchRatio(result) {
+  const m = result.transposeMargin;
+  const sc = result.transposeScore;
+  if (!Number.isFinite(sc) || !Number.isFinite(m) || sc === 0) return null;
+  return m / Math.abs(sc);
+}
+
 export function transposeTrusted(result) {
   const m = result.transposeMargin;
   const sc = result.transposeScore;
@@ -57,7 +72,9 @@ export function makeAlignment(result, song, createdAt = new Date().toISOString()
     endSec: r3(Math.max(endSec, result.eventStartSec[N - 1] + 0.2)),
     eventBeats: (result.eventBeats || []).map((b) => (Number.isFinite(b) ? b : null)),
     // music that is not in the sheet (a repeat, a solo...) between the end of event before-1 and the start of `before`
-    gaps: (result.gaps || []).filter((g) => g.endSec - g.startSec >= 1).map((g) => ({ before: g.before, startSec: r3(g.startSec), endSec: r3(g.endSec) })),
+    // events (indices) that the audio does not have: the audio is shorter than the sheet, or a whole section is missing
+    skipped: (result.skipped || []).map((v, j) => (v ? j : -1)).filter((j) => j >= 0),
+    gaps: (result.gaps || []).filter((g) => g.endSec - g.startSec >= GAP_MIN_SEC).map((g) => ({ before: g.before, startSec: r3(g.startSec), endSec: r3(g.endSec) })),
     sections: song.sections.map((_, si) => {
       const s = result.sections[si] || {};
       const i0 = idx[si][0];
@@ -66,8 +83,11 @@ export function makeAlignment(result, song, createdAt = new Date().toISOString()
         bpm: Number.isFinite(s.bpm) ? s.bpm : null,
         confidence: r2(Number.isFinite(s.confidence) ? s.confidence : 0),
         verified: false,
+        skipped: !!s.skipped,
       };
     }),
+    match: matchRatio(result) === null ? null : r3(matchRatio(result)),
+    forced: false,
     transposeFound: transposeTrusted(result) ? result.transposeFound || 0 : 0,
     tuningCents: Math.round((result.tuningCents || 0) * 10) / 10,
     shiftSec: 0,
@@ -92,13 +112,17 @@ export function normalizeAlignment(raw) {
     names: Array.isArray(raw.names) && raw.names.length === N ? raw.names.map((n) => String(n).slice(0, 20)) : null,
     endSec: Number.isFinite(raw.endSec) && raw.endSec > last ? raw.endSec : last + 2,
     eventBeats: Array.isArray(raw.eventBeats) && raw.eventBeats.length === N ? raw.eventBeats.map((b) => (Number.isFinite(b) && b >= 1 ? Math.round(b) : null)) : new Array(N).fill(null),
+    skipped: Array.isArray(raw.skipped) ? Array.from(new Set(raw.skipped.filter((j) => Number.isInteger(j) && j >= 0 && j < N))).sort((a, b) => a - b) : [],
     gaps: Array.isArray(raw.gaps) ? raw.gaps.filter((g) => g && Number.isInteger(g.before) && g.before >= 1 && g.before < N && Number.isFinite(g.startSec) && Number.isFinite(g.endSec) && g.endSec >= g.startSec && g.startSec >= raw.eventStartSec[g.before - 1] && g.endSec <= raw.eventStartSec[g.before] + 1e-6).map((g) => ({ before: g.before, startSec: g.startSec, endSec: g.endSec })) : [],
     sections: raw.sections.map((s) => ({
       startSec: s && Number.isFinite(s.startSec) ? s.startSec : null,
       bpm: s && Number.isFinite(s.bpm) ? s.bpm : null,
       confidence: s && Number.isFinite(s.confidence) ? Math.min(1, Math.max(0, s.confidence)) : 0,
       verified: !!(s && s.verified),
+      skipped: !!(s && s.skipped),
     })),
+    match: Number.isFinite(raw.match) ? raw.match : null,
+    forced: !!raw.forced,
     transposeFound: Number.isInteger(raw.transposeFound) ? raw.transposeFound : 0,
     tuningCents: Number.isFinite(raw.tuningCents) ? raw.tuningCents : 0,
     shiftSec: Number.isFinite(raw.shiftSec) ? Math.max(-5, Math.min(5, raw.shiftSec)) : 0,
@@ -116,10 +140,11 @@ export function alignmentFits(alignment, song) {
   return true;
 }
 
-// 'verified' | 'green' | 'yellow' | 'red'
+// 'verified' | 'green' | 'yellow' | 'red' | 'skipped' (the audio does not have the section)
 export function sectionState(alignment, si) {
   const s = alignment.sections[si];
   if (!s) return 'red';
+  if (s.skipped) return 'skipped';
   if (s.verified) return 'verified';
   if (s.bpm === null) return s.confidence >= CONF_YELLOW_FREE ? 'yellow' : 'red'; // no stable beat: never green
   return s.confidence >= CONF_GREEN ? 'green' : s.confidence >= CONF_YELLOW ? 'yellow' : 'red';
@@ -130,12 +155,29 @@ export function alignmentRecognised(alignment, song) {
   const idx = sectionEventIndices(song);
   let n = 0;
   let red = 0;
+  let skippedSecs = 0;
   idx.forEach((list, si) => {
     if (!list.length) return;
+    const st = sectionState(alignment, si);
+    if (st === 'skipped') { skippedSecs++; return; }
     n++;
-    if (sectionState(alignment, si) === 'red') red++;
+    if (st === 'red') red++;
   });
-  return n === 0 || red / n < NOT_RECOGNISED_RED;
+  // almost everything skipped: nothing of the sheet is in the audio
+  if (n === 0) return skippedSecs === 0;
+  if (red / n < NOT_RECOGNISED_RED) return true;
+  // mostly red (a very noisy recording): still the right song if the sheet fits the audio far better in its best
+  // transposition than in any other, and it is not mostly skipped
+  return Number.isFinite(alignment.match) && alignment.match >= RECOGNISED_MATCH && skippedSecs <= n;
+}
+
+// "Usa comunque": keeps an alignment that was not recognised, with every section yellow or red at most.
+export function capAtYellow(alignment) {
+  const top = CONF_GREEN - 0.01;
+  alignment.confidence = alignment.confidence.map((c) => Math.min(c, top));
+  alignment.sections.forEach((s) => { if (!s.verified) s.confidence = Math.min(s.confidence, top); });
+  alignment.forced = true;
+  return alignment;
 }
 
 export function countVerified(alignment) {
@@ -150,12 +192,13 @@ export function countVerified(alignment) {
 export function effectiveEventTimes(song, alignment, anchors = null) {
   const shift = alignment.shiftSec || 0;
   const starts = alignment.eventStartSec.map((t) => t + shift);
-  const gapEndOf = new Map((alignment.gaps || []).map((g) => [g.before - 1, g]));
+  const gapEndOf = new Map((alignment.gaps || []).filter((g) => g.endSec - g.startSec >= GAP_MIN_SEC).map((g) => [g.before - 1, g]));
+  const skippedSet = new Set(alignment.skipped || []);
   const endLast = alignment.endSec + shift;
   const warnings = [];
   const idx = sectionEventIndices(song);
   const secs = [];
-  idx.forEach((list, si) => { if (list.length) secs.push({ si, i0: list[0], i1: list[list.length - 1] }); });
+  idx.forEach((list, si) => { if (list.length && !list.every((j) => skippedSet.has(j))) secs.push({ si, i0: list[0], i1: list[list.length - 1] }); });
   const hasAnchors = anchors && secs.some((m) => m.si > 0 && Number.isFinite(anchors[m.si]));
   const finish = (endSec) => {
     const ends = starts.map((t, j) => (j + 1 < starts.length ? starts[j + 1] : endSec));

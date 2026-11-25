@@ -17,6 +17,11 @@ const G_BASS = 2.5;
 const COS_EPS = 0.3;
 const GAP_START = 4;
 const GAP_FRAME = 1;
+const INTRO_FRAME = 0.3;
+// cost of skipping an event / one event of a whole section that the audio does not have: the last events of the sheet
+// (audio shorter than the sheet) cost less than a section in the middle
+const SKIP_TAIL = 5;
+const SKIP_MID = 12;
 const MARGIN_SHIFTS = [0.25, 0.5, 1];
 // inner-loop steps of the Viterbi between two yields (about 5-10 ms of work in Node)
 const VITERBI_SLICE_WORK = 1.5e6;
@@ -56,7 +61,7 @@ export function chordTemplate(name) {
 }
 
 // Shifted copy of a template (the recording is `shift` semitones above the sheet).
-function shiftedTemplate(t, shift) {
+export function shiftedTemplate(t, shift) {
   const w = new Float64Array(12);
   for (let i = 0; i < 12; i++) w[mod12(i + shift)] = t.weights[i];
   return { root: mod12(t.root + shift), bass: mod12(t.bass + shift), weights: w };
@@ -139,7 +144,7 @@ function cumulative(a, D, T) {
 // Music that is not in the sheet: where gapBefore[j] is set, event j may start after a gap that
 // follows the end of event j-1 (a neutral emission: it costs `gapStart` once and `gapFrame` per
 // frame; a running maximum keeps this linear in the number of boundaries).
-function* viterbi({ cumE, cumG, T, chordOf, N, stride, lo, hi, dmin, dmax, expected, sigma, lambda, bonus, kappa, gapBefore = null, gapStart = 0 }) {
+function* viterbi({ cumE, cumG, cumG0 = null, T, chordOf, N, stride, lo, hi, dmin, dmax, expected, sigma, lambda, bonus, kappa, gapBefore = null, gapStart = 0, segs = null, tailCost = null }) {
   const U = Math.floor(T / stride);
   const Tp = T + 1;
   const back = new Int16Array(N * (U + 1)).fill(-1);
@@ -150,9 +155,22 @@ function* viterbi({ cumE, cumG, T, chordOf, N, stride, lo, hi, dmin, dmax, expec
   // frames outside the events (before the first, after the last, between sections) score like the best chord
   // of the sheet minus gapFrame: the music not in the sheet is neither rewarded nor punished by the sheet's chords
   const gcum = (u) => cumG[u * stride];
-  for (let u = 0; u <= U; u++) prev[u] = kappa * (bonus ? bonus[u * stride] : 0) + gcum(u);
+  // before the first event the frames score without the gapFrame deficit: nothing is gained by starting the first chord
+  // early, on music that is not in the sheet
+  const g0 = cumG0 || cumG;
+  for (let u = 0; u <= U; u++) prev[u] = kappa * (bonus ? bonus[u * stride] : 0) + g0[u * stride];
   let work = 0;
+  // sections that may be skipped (not in the audio): at the first event the scores are kept, at the last one the
+  // skipped alternative (same position, a cost) competes with the normal one
+  const segStart = new Int32Array(N).fill(-1);
+  const segEnd = new Int32Array(N).fill(-1);
+  const skipFlag = segs ? segs.map(() => new Uint8Array(U + 1)) : null;
+  if (segs) segs.forEach((g, k) => { segStart[g.a] = k; segEnd[g.b] = k; });
+  let pre = null;
+  const endScore = tailCost ? new Float64Array(N) : null;
+  const endAt = tailCost ? new Int32Array(N) : null;
   for (let j = 0; j < N; j++) {
+    if (segStart[j] >= 0) pre = Float64Array.from(prev);
     cur.fill(-Infinity);
     const c = chordOf[j];
     const base = c >= 0 ? c * Tp : -1;
@@ -198,6 +216,24 @@ function* viterbi({ cumE, cumG, T, chordOf, N, stride, lo, hi, dmin, dmax, expec
       }
     }
     const t = prev; prev = cur; cur = t;
+    if (segEnd[j] >= 0) {
+      const k = segEnd[j];
+      const cost = segs[k].cost;
+      for (let u = 0; u <= U; u++) {
+        const v = pre[u] - cost;
+        if (v > prev[u]) { prev[u] = v; skipFlag[k][u] = 1; }
+      }
+    }
+    if (tailCost) {
+      let bj = -Infinity;
+      let ba = -1;
+      for (let u = 0; u <= U; u++) {
+        const v = prev[u] + g0[U * stride] - g0[u * stride];
+        if (v > bj) { bj = v; ba = u; }
+      }
+      endScore[j] = bj;
+      endAt[j] = ba;
+    }
     work += (Math.min(U, hi[j]) - lo[j] + 1) * (dhi - dlo + 1) + U;
     if (work > VITERBI_SLICE_WORK) {
       work = 0;
@@ -206,15 +242,35 @@ function* viterbi({ cumE, cumG, T, chordOf, N, stride, lo, hi, dmin, dmax, expec
   }
   let bu = -1;
   let bv = -Infinity;
+  let lastEvent = N - 1;
   for (let u = 0; u <= U; u++) {
-    const v = prev[u] + gcum(U) - gcum(u);
+    const v = prev[u] + g0[U * stride] - g0[u * stride];
     if (v > bv) { bv = v; bu = u; }
+  }
+  if (tailCost) {
+    // the sheet may go on after the end of the audio: the last events are skipped, at a cost each
+    let acc = 0;
+    let bestTail = bv;
+    for (let j = N - 2; j >= 0; j--) {
+      acc += tailCost[j + 1];
+      const v = endScore[j] - acc;
+      if (v > bestTail + 1e-9) { bestTail = v; lastEvent = j; bu = endAt[j]; }
+    }
+    bv = bestTail;
   }
   if (bu < 0) return null;
   const ends = new Int32Array(N);
   const starts = new Int32Array(N);
+  const skipped = new Uint8Array(N);
+  for (let j = lastEvent + 1; j < N; j++) { ends[j] = bu; starts[j] = bu; skipped[j] = 1; }
   let u = bu;
-  for (let j = N - 1; j >= 0; j--) {
+  for (let j = lastEvent; j >= 0; j--) {
+    if (segEnd[j] >= 0 && skipFlag[segEnd[j]][u]) {
+      const g = segs[segEnd[j]];
+      for (let k = g.a; k <= g.b; k++) { ends[k] = u; starts[k] = u; skipped[k] = 1; }
+      j = g.a;
+      continue;
+    }
     ends[j] = u;
     u -= back[j * (U + 1) + u];
     starts[j] = u;
@@ -224,14 +280,14 @@ function* viterbi({ cumE, cumG, T, chordOf, N, stride, lo, hi, dmin, dmax, expec
       u--;
     }
   }
-  return { ends, starts, start0: starts[0], score: bv, stride };
+  return { ends, starts, skipped, start0: starts[0], score: bv, stride };
 }
 
 // Local seconds-per-prior-beat of every event (median of d / prior over +-`half` neighbours).
-function localScales(durFrames, priorBeats, rest, half, fallback) {
+function localScales(durFrames, priorBeats, rest, half, fallback, skipped = null) {
   const N = durFrames.length;
   const out = new Float64Array(N);
-  const ratios = durFrames.map((d, j) => (rest[j] || !(priorBeats[j] > 0) ? NaN : d / priorBeats[j]));
+  const ratios = durFrames.map((d, j) => (rest[j] || (skipped && skipped[j]) || !(priorBeats[j] > 0) ? NaN : d / priorBeats[j]));
   const all = ratios.filter(Number.isFinite).sort((a, b) => a - b);
   const g = all.length ? all[Math.floor(all.length / 2)] : fallback;
   for (let j = 0; j < N; j++) {
@@ -314,6 +370,20 @@ export function* alignEventsSteps(feat, events, options = {}) {
     for (let f = 0; f <= T; f++) g[f] = (bonus ? bonus[f] : 0) + options.gridBonus[f];
     bonus = g;
   }
+  // sections that can be skipped, and the cost of skipping the last events (null: nothing is skipped)
+  let segs = null;
+  let tailCost = null;
+  if (options.skips !== false && events.some((e) => e.section !== undefined)) {
+    segs = [];
+    for (let j = 0; j < N; j++) {
+      if (events[j].section === undefined) continue;
+      let b = j;
+      while (b + 1 < N && events[b + 1].section === events[j].section) b++;
+      if (!(j === 0 && b === N - 1)) segs.push({ a: j, b, cost: (options.skipMid ?? SKIP_MID) * (b - j + 1) });
+      j = b;
+    }
+    tailCost = new Float64Array(N).fill(options.skipTail ?? SKIP_TAIL);
+  }
   const kappa = options.kappa ?? 0.5;
   const sumPrior = priorBeats.reduce((a, b) => a + b, 0);
   const s0 = ((T * 0.95) / sumPrior); // frames per prior beat, whole recording
@@ -321,15 +391,17 @@ export function* alignEventsSteps(feat, events, options = {}) {
   const total = (options.candidates ?? 3) + 1 + 3; // runs, upper bound (progress only)
   let done = 0;
   const step = () => { done++; if (options.onProgress) options.onProgress(Math.min(1, done / total)); };
-  const run = function* (shift, stages) {
+  const run = function* (shift, stages, skipsOn = true) {
     const em = yield* emissions(feat, chordSet.chords, shift, options.gChroma ?? G_CHROMA, options.gBass ?? G_BASS);
     yield;
     const cumE = cumulative(em.em, em.D, T);
     const cumG = new Float64Array(T + 1);
+    const cumG0 = new Float64Array(T + 1);
     for (let t = 0; t < T; t++) {
       let m = -Infinity;
       for (let c = 0; c < em.D; c++) if (em.em[c * T + t] > m) m = em.em[c * T + t];
       cumG[t + 1] = cumG[t] + (Number.isFinite(m) ? Math.max(0, m - (options.gapFrame ?? GAP_FRAME)) : 0);
+      cumG0[t + 1] = cumG0[t] + (Number.isFinite(m) ? Math.max(0, m - (options.introFrame ?? INTRO_FRAME)) : 0);
     }
     yield;
     let scales = new Float64Array(N).fill(s0);
@@ -361,18 +433,18 @@ export function* alignEventsSteps(feat, events, options = {}) {
           hi[j] = Math.min(U, Math.ceil(centre + w));
         }
       }
-      const r = yield* viterbi({ cumE, cumG, T, chordOf: chordSet.chordOf, N, stride, lo, hi, dmin, dmax, expected, sigma: st.sigma, lambda: options.lambda ?? 8, bonus, kappa, gapBefore, gapStart: options.gapStart ?? GAP_START });
+      const r = yield* viterbi({ cumE, cumG, cumG0, T, chordOf: chordSet.chordOf, N, stride, lo, hi, dmin, dmax, expected, sigma: st.sigma, lambda: options.lambda ?? 8, bonus, kappa, gapBefore, gapStart: options.gapStart ?? GAP_START, segs: skipsOn ? segs : null, tailCost: skipsOn ? tailCost : null });
       if (!r) return null;
       res = r;
       strideNow = stride;
       lastExpected = expected;
       lastSigma = st.sigma;
       const durs = Array.from(res.ends, (e, j) => (e - res.starts[j]) * stride);
-      scales = localScales(durs, priorBeats, rest, 6, s0);
+      scales = localScales(durs, priorBeats, rest, 6, s0, res.skipped);
       step();
       yield;
     }
-    return { res, em, cumE, cumG, scales, stride: strideNow, expected: lastExpected, sigma: lastSigma };
+    return { res, em, cumE, cumG, cumG0, scales, stride: strideNow, expected: lastExpected, sigma: lastSigma };
   };
 
   let shifts;
@@ -386,7 +458,8 @@ export function* alignEventsSteps(feat, events, options = {}) {
   const coarse = [{ stride: 2, dminF: 0.2, dmaxF: 5, sigma: 1.0 }];
   const results = [];
   for (const sh of shifts) {
-    const r = yield* run(sh, coarse);
+    // (the choice of the transposition and its margin are made without skips: they would make every wrong one look decent)
+    const r = yield* run(sh, coarse, false);
     if (r) results.push({ shift: sh, score: r.res.score });
   }
   if (!results.length) return null;
@@ -411,10 +484,12 @@ export function* alignEventsSteps(feat, events, options = {}) {
   const cumCos = cumulative(fin.em.cos, fin.em.D, T);
   const Tp = T + 1;
   const confidence = new Float64Array(N);
+  const skipped = Array.from(res.skipped || new Uint8Array(N), (v) => !!v);
   for (let j = 0; j < N; j++) {
     const c = chordSet.chordOf[j];
     const a = startFrame[j];
     const b = endFrame[j];
+    if (skipped[j]) { confidence[j] = 0; continue; }
     if (c < 0 || b - a < 1) { confidence[j] = 0.3; continue; }
     const mean = (cc) => (cumCos[cc * Tp + b] - cumCos[cc * Tp + a]) / (b - a);
     const own = mean(c);
@@ -432,14 +507,21 @@ export function* alignEventsSteps(feat, events, options = {}) {
   const segOf = (j, a, b) => (chordSet.chordOf[j] >= 0 ? fin.cumE[chordSet.chordOf[j] * Tp + b] - fin.cumE[chordSet.chordOf[j] * Tp + a] : 0);
   const sharpness = new Float64Array(N);
   for (let j = 0; j < N; j++) {
+    if (skipped[j]) continue;
     const b0 = startFrame[j];
-    const coupled = j > 0 && startFrame[j] - endFrame[j - 1] <= 0; // no gap before: the previous event stretches too
+    let pj = j - 1;
+    while (pj >= 0 && skipped[pj]) pj--;
+    const coupled = pj === j - 1 && j > 0 && startFrame[j] - endFrame[j - 1] <= 0; // no gap before: the previous event stretches too
+    // the gap before (or the free stretch before the first event) scores its frames: moving the start changes it too
+    const G = pj < 0 ? fin.cumG0 : fin.cumG;
     const S = (b) => {
       let v = segOf(j, b, endFrame[j]) - penOf(j, endFrame[j] - b) + (kappa * (bonus ? bonus[b] : 0));
       if (coupled) v += segOf(j - 1, startFrame[j - 1], b) - penOf(j - 1, b - startFrame[j - 1]);
+      else v += G[b] - G[b0];
       return v;
     };
-    const lowLimit = coupled ? startFrame[j - 1] + 1 : Math.max(0, b0 - Math.ceil(fps * 1.5));
+    let lowLimit = coupled ? startFrame[j - 1] + 1 : Math.max(0, b0 - Math.ceil(fps * 1.5));
+    if (!coupled && pj >= 0) lowLimit = Math.max(lowLimit, endFrame[pj]);
     const highLimit = endFrame[j] - 1;
     const base = S(b0);
     const ms = [];
@@ -456,8 +538,27 @@ export function* alignEventsSteps(feat, events, options = {}) {
     sharpness[j] = ms.length ? Math.max(0, ms[ms.length >> 1]) : 0;
   }
   const gaps = [];
-  for (let j = 1; j < N; j++) if ((res.starts[j] - res.ends[j - 1]) * stride >= fps) gaps.push({ before: j, startSec: endSec[j - 1], endSec: startSec[j] });
-  return { startSec, endSec, confidence, sharpness, gaps, shift, shiftMargin, shiftScore: results[0].score, score: res.score, scales: fin.scales, chordSet, features: null };
+  // the first event has no neighbour that stretches with it: its start is believed when its chord is heard after the
+  // start and not before it (silence, or other music: an intro of the recording that is not in the sheet)
+  const startEvidence = new Float64Array(N).fill(NaN);
+  for (let j = 0; j < N; j++) {
+    if (skipped[j]) continue;
+    const c = chordSet.chordOf[j];
+    const a = startFrame[j];
+    const w = Math.max(2, Math.round(fps));
+    if (c >= 0 && a > 0 && endFrame[j] - a >= 1) {
+      const m = (x0, x1) => (x1 > x0 ? (cumCos[c * Tp + x1] - cumCos[c * Tp + x0]) / (x1 - x0) : 0);
+      startEvidence[j] = m(a, Math.min(endFrame[j], a + w)) - m(Math.max(0, a - w), a);
+    } else if (c >= 0 && a === 0) startEvidence[j] = 1;
+    break;
+  }
+  let lastPresent = -1;
+  for (let j = 0; j < N; j++) {
+    if (skipped[j]) continue;
+    if (lastPresent >= 0 && (res.starts[j] - res.ends[lastPresent]) * stride >= fps) gaps.push({ before: j, prev: lastPresent, startSec: endSec[lastPresent], endSec: startSec[j] });
+    lastPresent = j;
+  }
+  return { startSec, endSec, confidence, sharpness, startEvidence, gaps, skipped, shift, shiftMargin, shiftScore: results[0].score, score: res.score, scales: fin.scales, chordSet, features: null };
 }
 
 // Moves every boundary to the strongest onset within +-win seconds (if strong enough). The

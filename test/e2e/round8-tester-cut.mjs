@@ -3,7 +3,7 @@
 import { analyseAndAlign, songEvents } from '../../src/analysis/autosync.js';
 import { makeAlignment, sectionState } from '../../src/alignment.js';
 import { makeTrack } from './round8-tester-make.mjs';
-const COL = { green: 'g', yellow: 'y', red: 'r', verified: 'v' };
+const COL = { green: 'g', yellow: 'y', red: 'r', verified: 'v', skipped: 's' };
 let wrongGreen = 0, greenEvents = 0, total = 0;
 for (const seed of [5, 17, 42, 8, 23]) {
   const base = makeTrack({ seed }); const sr = base.sampleRate; const evs = songEvents(base.song);
