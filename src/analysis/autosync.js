@@ -81,18 +81,19 @@ export function* analyseAndAlignSteps({ samples, sampleRate, song, onProgress = 
   const N = events.length;
   const hints = effectiveSectionBpms(song);
   const tg = tempoCurves(feat.onset, feat.onsetFps);
-  let { startSec, endSec, sections, eventBeats, grids, confidence } = describe(al);
+  yield;
+  let { startSec, endSec, sections, eventBeats, grids, confidence } = yield* describe(al);
   let finalAl = al;
   if (opts.regrid && grids.length) {
     // second pass: the boundaries of the stable stretches are drawn to the beat / half-beat grid
     const gb = gridBonusFrames(grids, feat.fps, feat.frames, { gamma: opts.gridGamma ?? 4, width: opts.gridWidth ?? 0.3 });
     const al2 = yield* alignEventsSteps(feat, events, { onset: feat.onset, ...(opts.align || {}), shift: al.shift, gridBonus: gb });
-    if (al2) { finalAl = al2; ({ startSec, endSec, sections, eventBeats, grids, confidence } = describe(al2)); }
+    if (al2) { finalAl = al2; ({ startSec, endSec, sections, eventBeats, grids, confidence } = yield* describe(al2)); }
   }
   tk = lap('regrid', tk);
 
   // tempo, beat grid and boundary refinement from an alignment
-  function describe(a0) {
+  function* describe(a0) {
     const sections = [];
     const grids = [];
     // boundaries refined on the attacks (the DP grid is 93 ms)
@@ -101,12 +102,13 @@ export function* analyseAndAlignSteps({ samples, sampleRate, song, onProgress = 
     const eventBeats = new Array(N).fill(null);
     const pendingBeats = [];
     const confidence = Array.from(a0.confidence);
-    song.sections.forEach((sec, si) => {
+    for (let si = 0; si < song.sections.length; si++) {
+      yield;
       const idx = [];
       events.forEach((e, j) => { if (e.section === si) idx.push(j); });
       if (!idx.length) {
         sections.push({ startSec: null, endSec: null, bpm: null, confidence: 0, bpmConfidence: 0, beatGrid: false });
-        return;
+        continue;
       }
       const secStart = startSec[idx[0]];
       const secEnd = endSec[idx[idx.length - 1]];
@@ -143,7 +145,7 @@ export function* analyseAndAlignSteps({ samples, sampleRate, song, onProgress = 
         idx.forEach((j, k) => { startSec[j] = snapped[k]; });
         pendingBeats.push({ idx, bpm });
       }
-    });
+    }
     // an event that precedes music not in the sheet ends where that music starts
     const gapEnd = new Map((a0.gaps || []).map((g) => [g.before - 1, g.startSec]));
     for (let j = 0; j < N; j++) endSec[j] = j + 1 < N ? (gapEnd.has(j) ? Math.min(startSec[j + 1], Math.max(startSec[j], gapEnd.get(j))) : startSec[j + 1]) : endSec[j];

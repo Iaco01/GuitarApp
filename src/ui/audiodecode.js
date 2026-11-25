@@ -15,17 +15,37 @@ function decodeWith(ctx, bytes) {
   });
 }
 
-function toMono(buffer) {
+// Mono mix of a decoded buffer, in slices so the page keeps drawing (a 9 minute stereo song at 11 kHz is
+// 5.6 million samples per channel).
+async function toMono(buffer, tick) {
   const n = buffer.numberOfChannels;
   if (n === 1) return buffer.getChannelData(0);
   const len = buffer.length;
   const out = new Float32Array(len);
-  for (let c = 0; c < n; c++) {
-    const ch = buffer.getChannelData(c);
-    for (let i = 0; i < len; i++) out[i] += ch[i];
+  const chans = [];
+  for (let c = 0; c < n; c++) chans.push(buffer.getChannelData(c));
+  const STEP = 1 << 19;
+  for (let a = 0; a < len; a += STEP) {
+    const b = Math.min(len, a + STEP);
+    for (let c = 0; c < n; c++) {
+      const ch = chans[c];
+      for (let i = a; i < b; i++) out[i] += ch[i];
+    }
+    for (let i = a; i < b; i++) out[i] /= n;
+    await tick();
   }
-  for (let i = 0; i < len; i++) out[i] /= n;
   return out;
+}
+
+// Gives the page back for one task without the 4 ms clamp of nested setTimeout calls.
+let channel = null;
+export function nextTask() {
+  if (typeof MessageChannel === 'undefined') return new Promise((r) => setTimeout(r, 0));
+  if (!channel) channel = new MessageChannel();
+  return new Promise((resolve) => {
+    channel.port1.onmessage = () => { channel.port1.onmessage = null; resolve(); };
+    channel.port2.postMessage(0);
+  });
 }
 
 // Mono samples at (about) 11025 Hz. The file is decoded straight at that rate by an OfflineAudioContext
@@ -53,7 +73,7 @@ export async function decodeForAnalysis(blob) {
       try { ctx.close(); } catch { /* ignore */ }
     }
   }
-  const mono = toMono(buffer);
+  const mono = await toMono(buffer, nextTask);
   const rate = buffer.sampleRate;
   return { samples: rate === FEATURE_RATE ? mono : resampleMono(mono, rate, FEATURE_RATE), sampleRate: FEATURE_RATE, durationSec: buffer.duration };
 }
@@ -93,7 +113,7 @@ export async function runAutoSync({ song, blob, onProgress = () => {}, shouldCan
     yieldFn: () => new Promise((resolve) => {
       maxSlice = Math.max(maxSlice, performance.now() - lastYield);
       yields++;
-      setTimeout(() => { lastYield = performance.now(); resolve(); }, 0);
+      nextTask().then(() => { lastYield = performance.now(); resolve(); });
     }),
   });
   maxSlice = Math.max(maxSlice, performance.now() - lastYield);

@@ -94,6 +94,11 @@ function spectralPeaks(mag, df, fLo, fHi, relThreshold, out) {
 
 // Tuning of the recording in cents relative to A = 440 Hz (positive = sharp), in [-50, 50).
 export function estimateTuningCents(x, sampleRate = FEATURE_RATE) {
+  return runSteps(estimateTuningCentsSteps(x, sampleRate));
+}
+
+// Same as a generator (yields every 8 FFTs).
+export function* estimateTuningCentsSteps(x, sampleRate = FEATURE_RATE) {
   const nFrames = Math.floor(x.length / CHROMA_WIN) * 2;
   if (nFrames < 2) return 0;
   const df = sampleRate / CHROMA_WIN;
@@ -111,6 +116,7 @@ export function estimateTuningCents(x, sampleRate = FEATURE_RATE) {
   const im = new Float64Array(CHROMA_WIN);
   const step = 5;
   for (let t = 0; t + step < nFrames; t += 2 * step) {
+    if ((t / (2 * step)) % 8 === 7) yield;
     for (let i = 0; i < CHROMA_WIN; i++) {
       const p1 = t * hop - CHROMA_WIN / 2 + i;
       const p2 = (t + step) * hop - CHROMA_WIN / 2 + i;
@@ -146,14 +152,23 @@ export function computeFeatures(x, opts = {}) {
 export function* computeFeaturesSteps(x, { chromaHop = 1024, onProgress = null } = {}) {
   const sr = FEATURE_RATE;
   // level normalisation: rms 0.1
+  const CHUNK = 1 << 19; // yield now and then: a 9 minute song is 5.6 million samples
   let ss = 0;
-  for (let i = 0; i < x.length; i++) ss += x[i] * x[i];
+  for (let i = 0; i < x.length; i++) {
+    ss += x[i] * x[i];
+    if ((i & (CHUNK - 1)) === CHUNK - 1) yield;
+  }
   const rms = Math.sqrt(ss / Math.max(1, x.length));
   const g = rms > 1e-9 ? 0.1 / rms : 1;
   const xn = new Float32Array(x.length);
-  for (let i = 0; i < x.length; i++) xn[i] = x[i] * g;
+  for (let i = 0; i < x.length; i++) {
+    xn[i] = x[i] * g;
+    if ((i & (CHUNK - 1)) === CHUNK - 1) yield;
+  }
 
-  const tuningCents = estimateTuningCents(xn, sr);
+  yield;
+  const tuningCents = yield* estimateTuningCentsSteps(xn, sr);
+  yield;
   const tuneSemis = tuningCents / 100;
   const frames = Math.floor(xn.length / chromaHop) + 1;
   const df = sr / CHROMA_WIN;

@@ -18,6 +18,8 @@ const COS_EPS = 0.3;
 const GAP_START = 4;
 const GAP_FRAME = 1;
 const MARGIN_SHIFTS = [0.25, 0.5, 1];
+// inner-loop steps of the Viterbi between two yields (about 5-10 ms of work in Node)
+const VITERBI_SLICE_WORK = 1.5e6;
 
 const mod12 = (n) => ((n % 12) + 12) % 12;
 
@@ -82,7 +84,7 @@ export function buildChordSet(events) {
 
 // Per-frame cosine of every chord (cos) and the centred emission (em), as flat arrays
 // [chord * frames + t], plus cumulative sums with `frames + 1` entries per chord.
-function emissions(feat, chords, shift, gC = G_CHROMA, gB = G_BASS) {
+function* emissions(feat, chords, shift, gC = G_CHROMA, gB = G_BASS) {
   const T = feat.frames;
   const D = chords.length;
   const cos = new Float32Array(D * T);
@@ -91,6 +93,7 @@ function emissions(feat, chords, shift, gC = G_CHROMA, gB = G_BASS) {
   const zc = new Float64Array(D);
   const zb = new Float64Array(D);
   for (let t = 0; t < T; t++) {
+    if ((t & 255) === 255) yield;
     let n2 = 0;
     for (let k = 0; k < 12; k++) n2 += feat.chroma[t * 12 + k] ** 2;
     const inv = 1 / (Math.sqrt(n2) + COS_EPS);
@@ -136,7 +139,7 @@ function cumulative(a, D, T) {
 // Music that is not in the sheet: where gapBefore[j] is set, event j may start after a gap that
 // follows the end of event j-1 (a neutral emission: it costs `gapStart` once and `gapFrame` per
 // frame; a running maximum keeps this linear in the number of boundaries).
-function viterbi({ cumE, cumG, T, chordOf, N, stride, lo, hi, dmin, dmax, expected, sigma, lambda, bonus, kappa, gapBefore = null, gapStart = 0 }) {
+function* viterbi({ cumE, cumG, T, chordOf, N, stride, lo, hi, dmin, dmax, expected, sigma, lambda, bonus, kappa, gapBefore = null, gapStart = 0 }) {
   const U = Math.floor(T / stride);
   const Tp = T + 1;
   const back = new Int16Array(N * (U + 1)).fill(-1);
@@ -148,6 +151,7 @@ function viterbi({ cumE, cumG, T, chordOf, N, stride, lo, hi, dmin, dmax, expect
   // of the sheet minus gapFrame: the music not in the sheet is neither rewarded nor punished by the sheet's chords
   const gcum = (u) => cumG[u * stride];
   for (let u = 0; u <= U; u++) prev[u] = kappa * (bonus ? bonus[u * stride] : 0) + gcum(u);
+  let work = 0;
   for (let j = 0; j < N; j++) {
     cur.fill(-Infinity);
     const c = chordOf[j];
@@ -194,6 +198,11 @@ function viterbi({ cumE, cumG, T, chordOf, N, stride, lo, hi, dmin, dmax, expect
       }
     }
     const t = prev; prev = cur; cur = t;
+    work += (Math.min(U, hi[j]) - lo[j] + 1) * (dhi - dlo + 1) + U;
+    if (work > VITERBI_SLICE_WORK) {
+      work = 0;
+      yield;
+    }
   }
   let bu = -1;
   let bv = -Infinity;
@@ -313,7 +322,7 @@ export function* alignEventsSteps(feat, events, options = {}) {
   let done = 0;
   const step = () => { done++; if (options.onProgress) options.onProgress(Math.min(1, done / total)); };
   const run = function* (shift, stages) {
-    const em = emissions(feat, chordSet.chords, shift, options.gChroma ?? G_CHROMA, options.gBass ?? G_BASS);
+    const em = yield* emissions(feat, chordSet.chords, shift, options.gChroma ?? G_CHROMA, options.gBass ?? G_BASS);
     yield;
     const cumE = cumulative(em.em, em.D, T);
     const cumG = new Float64Array(T + 1);
@@ -352,7 +361,7 @@ export function* alignEventsSteps(feat, events, options = {}) {
           hi[j] = Math.min(U, Math.ceil(centre + w));
         }
       }
-      const r = viterbi({ cumE, cumG, T, chordOf: chordSet.chordOf, N, stride, lo, hi, dmin, dmax, expected, sigma: st.sigma, lambda: options.lambda ?? 8, bonus, kappa, gapBefore, gapStart: options.gapStart ?? GAP_START });
+      const r = yield* viterbi({ cumE, cumG, T, chordOf: chordSet.chordOf, N, stride, lo, hi, dmin, dmax, expected, sigma: st.sigma, lambda: options.lambda ?? 8, bonus, kappa, gapBefore, gapStart: options.gapStart ?? GAP_START });
       if (!r) return null;
       res = r;
       strideNow = stride;
