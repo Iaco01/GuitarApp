@@ -3,10 +3,17 @@
 // sections as ground truth, and the adoption of the measured tempos and durations.
 
 export const ALIGNMENT_VERSION = 1;
-// section state from the mean confidence of its events (a free tempo, with no stable beat, counts one step less)
-export const CONF_GREEN = 0.8;
-export const CONF_YELLOW = 0.65;
+// section state from the confidence of the section (median of its changes); a free tempo (no stable beat) is yellow at most
+export const CONF_GREEN = 0.75;
+export const CONF_YELLOW = 0.5;
+// without a stable beat the colour is yellow at most (the engine caps the confidence of those changes at 0.55)
+export const CONF_YELLOW_FREE = 0.4;
 const MIN_GAP_SEC = 0.05;
+// a transposition is proposed only if the best one beats the second best by this share of its score
+// (true recordings: 0.19-0.25 on the synthetic benches; noise, silence or another song: below 0.02)
+export const TRANSPOSE_MIN_RATIO = 0.1;
+// the audio is not recognised when this share of the sections (with chords) is red
+export const NOT_RECOGNISED_RED = 0.75;
 
 const r3 = (v) => Math.round(v * 1000) / 1000;
 const r2 = (v) => Math.round(v * 100) / 100;
@@ -27,6 +34,13 @@ export function sectionEventIndices(song) {
   const out = song.sections.map(() => []);
   eventRefs(song).forEach((e, j) => out[e.section].push(j));
   return out;
+}
+
+export function transposeTrusted(result) {
+  const m = result.transposeMargin;
+  const sc = result.transposeScore;
+  if (!Number.isFinite(sc) || !(m <= Infinity)) return true; // no margin information (older results)
+  return m >= TRANSPOSE_MIN_RATIO * Math.abs(sc);
 }
 
 // Alignment to store, from the result of analyseAndAlign.
@@ -54,7 +68,7 @@ export function makeAlignment(result, song, createdAt = new Date().toISOString()
         verified: false,
       };
     }),
-    transposeFound: result.transposeFound || 0,
+    transposeFound: transposeTrusted(result) ? result.transposeFound || 0 : 0,
     tuningCents: Math.round((result.tuningCents || 0) * 10) / 10,
     shiftSec: 0,
     accepted: false,
@@ -107,9 +121,21 @@ export function sectionState(alignment, si) {
   const s = alignment.sections[si];
   if (!s) return 'red';
   if (s.verified) return 'verified';
-  let level = s.confidence >= CONF_GREEN ? 2 : s.confidence >= CONF_YELLOW ? 1 : 0;
-  if (s.bpm === null && level > 0) level--; // no stable beat: harder to trust
-  return level === 2 ? 'green' : level === 1 ? 'yellow' : 'red';
+  if (s.bpm === null) return s.confidence >= CONF_YELLOW_FREE ? 'yellow' : 'red'; // no stable beat: never green
+  return s.confidence >= CONF_GREEN ? 'green' : s.confidence >= CONF_YELLOW ? 'yellow' : 'red';
+}
+
+// Is the audio the song of the sheet? false when almost every section is red (wrong file, noise, silence).
+export function alignmentRecognised(alignment, song) {
+  const idx = sectionEventIndices(song);
+  let n = 0;
+  let red = 0;
+  idx.forEach((list, si) => {
+    if (!list.length) return;
+    n++;
+    if (sectionState(alignment, si) === 'red') red++;
+  });
+  return n === 0 || red / n < NOT_RECOGNISED_RED;
 }
 
 export function countVerified(alignment) {
@@ -171,11 +197,15 @@ export function effectiveEventTimes(song, alignment, anchors = null) {
 // Replaces the start times of the events of section `si` (e.g. from the taps of "Correggi a orecchio").
 // `startsSec` must have one entry per event of the section, strictly increasing, after the end of the previous
 // section and before the start of the next. Mutates `alignment` only when ok; the section becomes verified.
-export function replaceSectionStarts(alignment, song, si, startsSec) {
+// With `partial` fewer entries are accepted (the person stopped before the end): they go to the first events of the
+// section, the others keep their automatic time (which must come after the last of them), and the section is not
+// marked verified. Returns { ok, reason? } or, when ok, { ok, missing } with the section positions left untimed.
+export function replaceSectionStarts(alignment, song, si, startsSec, { partial = false } = {}) {
   const idx = sectionEventIndices(song)[si];
   if (!idx || !idx.length) return { ok: false, reason: 'La sezione non ha accordi' };
-  if (startsSec.length !== idx.length) return { ok: false, reason: `Servono ${idx.length} tocchi, ne hai fatti ${startsSec.length}` };
-  for (let k = 0; k < startsSec.length; k++) {
+  const m = startsSec.length;
+  if (m === 0 || m > idx.length || (m < idx.length && !partial)) return { ok: false, reason: `Servono ${idx.length} tocchi, ne hai fatti ${m}` };
+  for (let k = 0; k < m; k++) {
     if (!Number.isFinite(startsSec[k]) || startsSec[k] < 0 || (k > 0 && startsSec[k] <= startsSec[k - 1])) return { ok: false, reason: 'I tocchi non sono in ordine' };
   }
   const shift = alignment.shiftSec || 0;
@@ -184,24 +214,32 @@ export function replaceSectionStarts(alignment, song, si, startsSec) {
   const prevEnd = first > 0 ? alignment.eventStartSec[first - 1] + shift : -Infinity;
   const nextStart = last + 1 < alignment.eventStartSec.length ? alignment.eventStartSec[last + 1] + shift : Infinity;
   if (startsSec[0] <= prevEnd + MIN_GAP_SEC) return { ok: false, reason: 'Il primo tocco cade prima della fine della sezione precedente' };
-  if (startsSec[startsSec.length - 1] >= nextStart - MIN_GAP_SEC) return { ok: false, reason: 'L’ultimo tocco cade dopo l’inizio della sezione successiva' };
-  idx.forEach((j, k) => {
+  const limit = m < idx.length ? alignment.eventStartSec[idx[m]] + shift : nextStart;
+  if (startsSec[m - 1] >= limit - MIN_GAP_SEC) {
+    return { ok: false, reason: m < idx.length ? 'Gli ultimi tocchi cadono dopo l’inizio automatico degli accordi che mancano: hai saltato un tocco?' : 'L’ultimo tocco cade dopo l’inizio della sezione successiva' };
+  }
+  for (let k = 0; k < m; k++) {
+    const j = idx[k];
     alignment.eventStartSec[j] = r3(startsSec[k] - shift);
     alignment.confidence[j] = 1;
     alignment.eventBeats[j] = null;
-  });
+  }
   const s = alignment.sections[si];
   s.startSec = r3(startsSec[0] - shift);
-  s.confidence = 1;
-  s.verified = true;
-  return { ok: true };
+  if (m === idx.length) {
+    s.confidence = 1;
+    s.verified = true;
+    // a gap that sat before an event that was moved is no longer reliable: drop the ones that no longer fit
+    if (alignment.gaps) alignment.gaps = alignment.gaps.filter((g) => g.startSec >= alignment.eventStartSec[g.before - 1] && g.endSec <= alignment.eventStartSec[g.before] + 1e-6);
+  }
+  return { ok: true, missing: idx.slice(m).map((_, k) => m + k) };
 }
 
 // Copy of the alignment with the starts of a section replaced (preview before saving). Same result shape.
-export function previewReplace(alignment, song, si, startsSec) {
+export function previewReplace(alignment, song, si, startsSec, options = {}) {
   const copy = JSON.parse(JSON.stringify(alignment));
-  const r = replaceSectionStarts(copy, song, si, startsSec);
-  return r.ok ? { ok: true, alignment: copy } : r;
+  const r = replaceSectionStarts(copy, song, si, startsSec, options);
+  return r.ok ? { ok: true, alignment: copy, missing: r.missing } : r;
 }
 
 // Global shift of the whole alignment (fine adjustment of "everything a bit earlier / later").

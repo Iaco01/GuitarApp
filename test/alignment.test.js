@@ -51,6 +51,8 @@ test('section states: confidence and free tempo', () => {
   const a = makeAlignment(result(), song());
   assert.equal(sectionState(a, 0), 'green');
   assert.equal(sectionState(a, 1), 'yellow'); // green confidence but a free tempo
+  assert.equal(sectionState(a, 2), 'yellow'); // 0.5: first yellow value
+  a.sections[2].confidence = 0.3;
   assert.equal(sectionState(a, 2), 'red');
   a.sections[2].verified = true;
   assert.equal(sectionState(a, 2), 'verified');

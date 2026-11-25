@@ -448,7 +448,7 @@ export function* alignEventsSteps(feat, events, options = {}) {
   }
   const gaps = [];
   for (let j = 1; j < N; j++) if ((res.starts[j] - res.ends[j - 1]) * stride >= fps) gaps.push({ before: j, startSec: endSec[j - 1], endSec: startSec[j] });
-  return { startSec, endSec, confidence, sharpness, gaps, shift, shiftMargin, score: res.score, scales: fin.scales, chordSet, features: null };
+  return { startSec, endSec, confidence, sharpness, gaps, shift, shiftMargin, shiftScore: results[0].score, score: res.score, scales: fin.scales, chordSet, features: null };
 }
 
 // Moves every boundary to the strongest onset within +-win seconds (if strong enough). The

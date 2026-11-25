@@ -11,6 +11,16 @@ import { effectiveSectionBpms } from '../model.js';
 const ONSET_LEAD = 0;
 const BPM_CONF_MIN = 0.35;
 const BPM_REGULARITY_MIN = 0.8;
+// Confidence of a change from the sharpness of its boundary (how much worse the path gets when it is moved,
+// per frame of displacement; correct changes of the synthetic benches: 3.4 at the 10th percentile, 5 median).
+// With a stable beat 3 or more is full confidence; without one (free tempo: the chords arrive one note at a time
+// and the path can sit on a wrong but sharp boundary) the confidence tops at FREE_CONF_MAX and needs 4.5.
+const SHARP_LO = 0.8;
+const SHARP_FULL = 3;
+const FREE_SHARP_LO = 2;
+const FREE_SHARP_FULL = 4.5;
+export const FREE_CONF_MAX = 0.55;
+const ramp = (x, lo, hi) => Math.max(0, Math.min(1, (x - lo) / (hi - lo)));
 
 // Flat list of the chord events of the song in reading order (the timeline order), with the prior
 // duration in beats: the stored ones, or the estimate from the text if the song has default ones.
@@ -26,6 +36,12 @@ export function songEvents(song) {
     });
   });
   return out;
+}
+
+function median(a) {
+  const s = a.slice().sort((x, y) => x - y);
+  const n = s.length;
+  return n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2;
 }
 
 // Semitones in (-6, 6].
@@ -65,13 +81,13 @@ export function* analyseAndAlignSteps({ samples, sampleRate, song, onProgress = 
   const N = events.length;
   const hints = effectiveSectionBpms(song);
   const tg = tempoCurves(feat.onset, feat.onsetFps);
-  let { startSec, endSec, sections, eventBeats, grids } = describe(al);
+  let { startSec, endSec, sections, eventBeats, grids, confidence } = describe(al);
   let finalAl = al;
   if (opts.regrid && grids.length) {
     // second pass: the boundaries of the stable stretches are drawn to the beat / half-beat grid
     const gb = gridBonusFrames(grids, feat.fps, feat.frames, { gamma: opts.gridGamma ?? 4, width: opts.gridWidth ?? 0.3 });
     const al2 = yield* alignEventsSteps(feat, events, { onset: feat.onset, ...(opts.align || {}), shift: al.shift, gridBonus: gb });
-    if (al2) { finalAl = al2; ({ startSec, endSec, sections, eventBeats, grids } = describe(al2)); }
+    if (al2) { finalAl = al2; ({ startSec, endSec, sections, eventBeats, grids, confidence } = describe(al2)); }
   }
   tk = lap('regrid', tk);
 
@@ -84,6 +100,7 @@ export function* analyseAndAlignSteps({ samples, sampleRate, song, onProgress = 
     const endSec = startSec.slice(1).concat([Math.max(startSec[N - 1], a0.endSec[N - 1])]);
     const eventBeats = new Array(N).fill(null);
     const pendingBeats = [];
+    const confidence = Array.from(a0.confidence);
     song.sections.forEach((sec, si) => {
       const idx = [];
       events.forEach((e, j) => { if (e.section === si) idx.push(j); });
@@ -93,9 +110,6 @@ export function* analyseAndAlignSteps({ samples, sampleRate, song, onProgress = 
       }
       const secStart = startSec[idx[0]];
       const secEnd = endSec[idx[idx.length - 1]];
-      let conf = 0;
-      for (const j of idx) conf += a0.confidence[j];
-      conf /= idx.length;
       // tempo: the part of the section after its first beat of settling
       const a = secStart + Math.min(1.5, (secEnd - secStart) * 0.1);
       const curve = curveOfRange(tg, a, secEnd);
@@ -117,6 +131,12 @@ export function* analyseAndAlignSteps({ samples, sampleRate, song, onProgress = 
         }
         bpmConf = Math.min(1, pick.conf) * (0.5 + 0.5 * reg);
       }
+      // confidence of the changes (stable beat or not), and of the section: the median of its changes
+      for (const j of idx) {
+        const sh = a0.sharpness ? a0.sharpness[j] : Infinity;
+        confidence[j] = Math.min(a0.confidence[j], beatGrid ? ramp(sh, SHARP_LO, SHARP_FULL) : FREE_CONF_MAX * ramp(sh, FREE_SHARP_LO, FREE_SHARP_FULL));
+      }
+      const conf = median(idx.map((j) => confidence[j]));
       sections.push({ startSec: secStart, endSec: secEnd, bpm, confidence: conf, bpmConfidence: bpmConf, beatGrid, tempoCandidate: pick.bpm, regularity: reg, beatTimes });
       if (beatGrid) {
         const snapped = snapToBeats(idx.map((j) => startSec[j]), beatTimes, bpm, opts.snapTol ?? 0.2, !!opts.snapHalf);
@@ -132,20 +152,21 @@ export function* analyseAndAlignSteps({ samples, sampleRate, song, onProgress = 
       const e = events.map((ev, j) => (ev.section === i ? j : -1)).filter((j) => j >= 0);
       if (e.length) { s.startSec = startSec[e[0]]; s.endSec = endSec[e[e.length - 1]]; }
     });
-    return { startSec, endSec, sections, eventBeats, grids };
+    return { startSec, endSec, sections, eventBeats, grids, confidence };
   }
   al = finalAl;
   if (onProgress) onProgress(1);
   return {
     eventStartSec: startSec,
     eventEndSec: endSec,
-    confidence: Array.from(al.confidence),
+    confidence,
     sharpness: Array.from(al.sharpness),
     sections,
     eventBeats,
     gaps: (al.gaps || []).map((g) => ({ before: g.before, startSec: endSec[g.before - 1], endSec: startSec[g.before] })).filter((g) => g.endSec - g.startSec >= 1),
     transposeFound: wrapSemis(al.shift),
     transposeMargin: al.shiftMargin,
+    transposeScore: al.shiftScore,
     tuningCents: feat.tuningCents,
     computeMs: now() - t0,
     timings,
