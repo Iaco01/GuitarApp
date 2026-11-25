@@ -5,15 +5,17 @@
 import { domEl, domClear } from './dom.js';
 import { runAutoSync, AUTOSYNC_CANCELLED } from './audiodecode.js';
 import { openCorrection } from './correct.js';
-import { eventRefs, sectionState, sectionEventIndices, alignmentFits, alignmentRecognised, countVerified, shiftAlignment, applyMeasuredTiming, exportTruth } from '../alignment.js';
+import { eventRefs, sectionState, sectionEventIndices, alignmentFits, alignmentRecognised, countVerified, shiftAlignment, applyMeasuredTiming, exportTruth, capAtYellow } from '../alignment.js';
 import { formatClock } from '../audiosync.js';
 import { formatBpm } from '../render.js';
 
+// short words: the state and the BPM must fit in one row at 320 px (a longer text was cut, and the BPM with it)
 const AS_STATE_TEXT = {
   green: 'sicura',
-  yellow: 'da controllare',
+  yellow: 'controlla',
   red: 'incerta',
   verified: 'verificata ✓',
+  skipped: 'non presente nell’audio',
 };
 const AS_SHIFT_MS = [-100, -50, 50, 100];
 const AS_LEAD_SEC = 2;
@@ -45,6 +47,8 @@ export function createAutoSyncPanel({ song, getBlob, getPlayer, timelineWith, pe
   let progress = 0;
   let progressLabel = '';
   let stats = null;
+  // the last result that was not recognised: «Usa comunque» can still keep it (every section yellow at most)
+  let unrecognised = null;
   let nowText = '';
   let lastEv = '';
   let progBar = null;
@@ -64,6 +68,7 @@ export function createAutoSyncPanel({ song, getBlob, getPlayer, timelineWith, pe
     progress = 0;
     progressLabel = 'Preparo…';
     stats = null;
+    unrecognised = null;
     refresh();
     try {
       const r = await runAutoSync({
@@ -76,6 +81,7 @@ export function createAutoSyncPanel({ song, getBlob, getPlayer, timelineWith, pe
         // almost every section is red: wrong file, noise or silence. Nothing is kept.
         running = false;
         window.__gappAutosync = { ...r.stats, events: r.alignment.eventStartSec.length, notRecognised: true };
+        unrecognised = r;
         setMsg('Audio non riconosciuto: è il brano giusto? Controlla il file audio, oppure usa la sincronizzazione manuale qui sotto.', true);
         refresh();
         if (onChange) onChange();
@@ -96,6 +102,19 @@ export function createAutoSyncPanel({ song, getBlob, getPlayer, timelineWith, pe
       else if (err && err.message === 'no-alignment') setMsg('Non sono riuscito ad allineare questo brano all’audio. Usa la sincronizzazione manuale qui sotto.', true);
       else setMsg('Errore durante l’analisi: ' + (err && err.message ? err.message : 'sconosciuto') + '. Se il telefono è lento o con poca memoria, usa la sincronizzazione manuale.', true);
     }
+    refresh();
+    if (onChange) onChange();
+  }
+
+  function forceKeep() {
+    if (!unrecognised) return;
+    const r = unrecognised;
+    unrecognised = null;
+    song.audio.alignment = capAtYellow(r.alignment);
+    song.audio.offsetSec = Math.max(0, r.alignment.eventStartSec[0]);
+    stats = r.stats;
+    rebuild();
+    setMsg('Allineamento tenuto comunque: nessuna sezione è segnata come sicura. Ascolta e controlla ogni sezione.');
     refresh();
     if (onChange) onChange();
   }
@@ -126,7 +145,8 @@ export function createAutoSyncPanel({ song, getBlob, getPlayer, timelineWith, pe
     const tl = timelineWith(null);
     const idx = sectionEventIndices(song);
     const refs = eventRefs(song);
-    const counts = { green: 0, yellow: 0, red: 0, verified: 0 };
+    const counts = { green: 0, yellow: 0, red: 0, verified: 0, skipped: 0 };
+    const skippedEv = new Set(a.skipped || []);
     const rows = domEl('ul', { class: 'as-rows', id: 'as-rows' });
     // stretches of music that is not in the sheet (a repeat, a solo...), shown before the section that follows
     const gapsBefore = new Map();
@@ -142,13 +162,20 @@ export function createAutoSyncPanel({ song, getBlob, getPlayer, timelineWith, pe
       }
       const st = sectionState(a, si);
       counts[st]++;
+      if (st === 'skipped') {
+        rows.append(domEl('li', { class: 'as-row as-skipped', 'data-sec': si, 'data-state': st },
+          domEl('span', { class: 'as-dot', 'aria-hidden': 'true' }),
+          domEl('div', { class: 'as-info' }, domEl('div', { class: 'as-top' }, domEl('span', { class: 'as-name' }, `${secName(si)}: non presente nell’audio`)))));
+        return;
+      }
       const s = a.sections[si];
+      const cut = idx[si].filter((j) => skippedEv.has(j)).length;
       const tsec = tl.sections[si];
       rows.append(domEl('li', { class: 'as-row', 'data-sec': si, 'data-state': st },
         domEl('span', { class: 'as-dot', 'aria-hidden': 'true' }),
         domEl('div', { class: 'as-info' },
           domEl('div', { class: 'as-top' }, domEl('span', { class: 'as-name' }, secName(si)), domEl('span', { class: 'as-time' }, formatClock(tsec ? tsec.startSec : 0))),
-          domEl('div', { class: 'as-sub' }, `${AS_STATE_TEXT[st]} · ${s.bpm === null ? 'tempo libero' : formatBpm(s.bpm) + ' BPM'}`)),
+          domEl('div', { class: 'as-sub' }, `${AS_STATE_TEXT[st]} · ${s.bpm === null ? 'libero' : formatBpm(s.bpm) + ' BPM'}${cut ? ` · −${cut} accordi` : ''}`)),
         domEl('button', { type: 'button', class: 'btn icon as-act', 'data-act': 'listen', 'aria-label': `Ascolta ${secName(si)}`, title: 'Ascolta', onclick: () => listenFrom((tsec ? tsec.startSec : 0) - 1) }, '▶'),
         domEl('button', {
           type: 'button', class: 'btn icon as-act' + (st === 'yellow' || st === 'red' ? ' primary' : ''), 'data-act': 'correct', 'aria-label': `Correggi a orecchio ${secName(si)}`, title: 'Correggi a orecchio',
@@ -212,6 +239,14 @@ export function createAutoSyncPanel({ song, getBlob, getPlayer, timelineWith, pe
           domEl('button', { type: 'button', class: 'btn danger', id: 'as-discard', onclick: discard }, 'Scarta')));
       return;
     }
+    if (!a && unrecognised) {
+      el.append(
+        domEl('p', { class: 'muted small', id: 'as-unrec' }, 'Se sei sicuro che il file è il brano giusto, puoi tenere comunque l’allineamento trovato: nessuna sezione sarà segnata come sicura, controllale una per una.'),
+        domEl('div', { class: 'row' },
+          domEl('button', { type: 'button', class: 'btn', id: 'as-force', onclick: () => forceKeep() }, 'Usa comunque'),
+          domEl('button', { type: 'button', class: 'btn primary', id: 'as-start', onclick: start }, 'Riprova')));
+      return;
+    }
     if (!a) {
       el.append(
         domEl('p', { class: 'muted' }, 'L’app ascolta il file e trova da sola l’inizio del brano, il tempo e il momento in cui cambia ogni accordo. Poi controlli e correggi le parti incerte.'),
@@ -222,7 +257,7 @@ export function createAutoSyncPanel({ song, getBlob, getPlayer, timelineWith, pe
     const c = sum.counts;
     el.append(
       domEl('p', { class: 'as-counts', id: 'as-counts' },
-        `${c.green} sicure · ${c.yellow} da controllare · ${c.red} incerte · ${c.verified} verificate a orecchio`),
+        `${c.green} sicure · ${c.yellow} da controllare · ${c.red} incerte · ${c.verified} verificate a orecchio${c.skipped ? ` · ${c.skipped} non presenti nell’audio` : ''}`),
       domEl('p', { class: 'muted small' }, 'Verde: sicura. Giallo: da controllare. Rosso: incerta. Verde scuro: verificata a orecchio. Il colore indica quanto l’app si fida, non quanto è giusta.'));
     if (stats) el.append(domEl('p', { class: 'muted small', id: 'as-stats' }, `Calcolo: decodifica ${(stats.decodeMs / 1000).toFixed(1)} s, analisi ${(stats.analyseMs / 1000).toFixed(1)} s.`));
     if (a.transposeFound !== 0) {

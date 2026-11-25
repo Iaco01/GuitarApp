@@ -187,6 +187,10 @@ h1, h2, h3, p, ul, ol, dl, dd { margin: 0; }
 .pp-cur-main { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .pp-cur-name { font: 800 28px/1.1 var(--mono); color: var(--cc, var(--fg)); min-height: 32px; white-space: nowrap; }
 .pp-cur-name.count { color: var(--accent); }
+.pp-cur-gap { font: 600 12px/17px var(--ui); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pp-cur-gap[hidden] { display: none; }
+.pp-cur.gap .pp-cur-name { font-size: 18px; line-height: 20px; min-height: 20px; color: var(--muted); }
+.pp-cur.gap .pp-cur-bar { display: none; }
 .pp-cur-bar { height: 5px; border-radius: 3px; background: var(--line); overflow: hidden; }
 .pp-cur-fill { height: 100%; width: 0; background: var(--accent); }
 .pp-next { flex: 0 0 auto; display: flex; align-items: center; gap: 5px; padding: 3px 6px; border: 2px dashed var(--line); border-radius: 10px; }
@@ -401,11 +405,14 @@ h1, h2, h3, p, ul, ol, dl, dd { margin: 0; }
 .as-row[data-state="green"] { --sc: var(--ok); }
 .as-row[data-state="yellow"] { --sc: var(--warn); }
 .as-row[data-state="red"] { --sc: var(--bad); }
+.as-row[data-state="skipped"] { --sc: var(--muted); opacity: .75; grid-template-columns: 14px 1fr; border-style: dashed; }
 .as-row[data-state="verified"] { --sc: var(--ver); background: color-mix(in srgb, var(--ver) 12%, transparent); }
 .as-row.playing { outline: 2px solid var(--accent); }
 .as-dot { width: 14px; height: 14px; border-radius: 50%; background: var(--sc, var(--line)); }
 .as-info { min-width: 0; }
-.as-top { display: flex; justify-content: space-between; gap: 8px; font-weight: 700; }
+.as-top { display: flex; justify-content: space-between; gap: 8px; font-weight: 700; min-width: 0; }
+.as-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.as-time { flex: none; white-space: nowrap; }
 .as-time { font: 700 15px var(--mono); }
 .as-sub { font: 600 13px var(--ui); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .as-shift .btn { min-width: 0; padding: 0 6px; white-space: nowrap; }
@@ -420,6 +427,8 @@ h1, h2, h3, p, ul, ol, dl, dd { margin: 0; }
 .sync-manual-sum { font-weight: 700; cursor: pointer; min-height: 32px; }
 .sync-manual[open] > .sync-box { margin-top: 10px; }
 .corr { z-index: 40; }
+/* nothing in the column shrinks: with 35 chords the instructions were covered by the big button (the sheet scrolls instead) */
+.corr > * { flex-shrink: 0; }
 .corr-count { font: 800 24px var(--mono); }
 .corr-next { font: 800 20px var(--ui); color: var(--accent); }
 .corr-chips { list-style: none; padding: 0; display: flex; flex-wrap: wrap; gap: 4px; max-height: 26vh; overflow-y: auto; }
@@ -429,7 +438,7 @@ h1, h2, h3, p, ul, ol, dl, dd { margin: 0; }
 .corr-chip.now { background: var(--cc, var(--accent)); color: var(--bg); }
 .corr-status { font: 600 15px var(--ui); min-height: 22px; }
 .corr-status.error { color: var(--danger); }
-.corr-tap { min-height: 28vh; font: 800 40px var(--ui) !important; touch-action: manipulation; user-select: none; -webkit-user-select: none; flex: 1 1 auto; }
+.corr-tap { min-height: 28vh; font: 800 40px var(--ui) !important; touch-action: manipulation; user-select: none; -webkit-user-select: none; flex: 1 0 auto; }
 .corr-react { display: flex; align-items: center; gap: 8px; }
 .corr-react .btn { min-width: 44px; min-height: 44px; }
 .corr-react-val { font: 700 16px var(--mono); min-width: 64px; text-align: center; }

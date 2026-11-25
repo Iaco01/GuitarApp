@@ -123,7 +123,7 @@ export function openCorrection({ song, sectionIndex, name, getPlayer, timelineWi
     p.setTimeline(timelineWith(pr.alignment));
     p.playFromTime(Math.max(0, r.starts[0] - 1.5));
     setStatus(pr.missing.length
-      ? `Anteprima: mancano ${pr.missing.length} tocchi. Senza tempo (tengono quello automatico): ${pr.missing.map(chordText).join(', ')}.`
+      ? `Anteprima: ${pr.missing.length === 1 ? 'manca 1 tocco' : `mancano ${pr.missing.length} tocchi`}. Senza tempo (tengono quello automatico): ${pr.missing.map(chordText).join(', ')}.`
       : 'Anteprima: l’accordo evidenziato deve cambiare insieme a quello che senti.');
     paint();
   }

@@ -17,7 +17,9 @@ export function createPlayPanel(song, { onLoopExit = null, onPlayPause, onStop, 
   const curName = domEl('div', { class: 'pp-cur-name', id: 'pp-current' }, '–');
   const curDg = domEl('span', { class: 'pp-dg', id: 'pp-current-dg' });
   const curBar = domEl('div', { class: 'pp-cur-bar' }, domEl('div', { class: 'pp-cur-fill' }));
-  const cur = domEl('div', { class: 'pp-cur' }, domEl('div', { class: 'pp-cur-main' }, curDg, curName), curBar);
+  // inside music that is not in the sheet: the bar gives way to the countdown to the next chord
+  const curGap = domEl('div', { class: 'pp-cur-gap', id: 'pp-gap', hidden: true }, '');
+  const cur = domEl('div', { class: 'pp-cur' }, domEl('div', { class: 'pp-cur-main' }, curDg, curName), curBar, curGap);
   const nextName = domEl('span', { class: 'pp-next-name', id: 'pp-next' }, '–');
   const nextDg = domEl('span', { class: 'pp-dg', id: 'pp-next-dg' });
   const nextBadge = domEl('span', { class: 'pp-badge', id: 'pp-left', title: 'Battiti al cambio' }, '');
@@ -77,11 +79,13 @@ export function createPlayPanel(song, { onLoopExit = null, onPlayPause, onStop, 
   }
   const bpmBox = domEl('div', { class: 'pp-bpmbox', role: 'group', 'aria-label': 'BPM' }, bpmMinus, bpmEl, bpmPlus);
   const bpmField = domEl('input', { type: 'number', inputmode: 'decimal', min: '30', max: '300', step: '1', class: 'bpm-field', id: 'pp-bpm-field', 'aria-label': 'BPM' });
+  const applyBtn = domEl('button', { type: 'button', class: 'btn primary small', id: 'pp-bpm-apply', onclick: () => { const v = parseFloat(String(bpmField.value).replace(',', '.')); if (onBpmSet && onBpmSet(v) !== false) bpmEdit.hidden = true; } }, 'Applica');
+  const tapBtn2 = domEl('button', { type: 'button', class: 'btn small', id: 'pp-bpm-tap', onclick: () => { if (onTap) onTap(); } }, 'Tap tempo');
   const bpmEdit = domEl('div', { class: 'pp-bpmedit', id: 'pp-bpmedit', hidden: true },
     bpmField,
     scopeBtn2,
-    domEl('button', { type: 'button', class: 'btn primary small', id: 'pp-bpm-apply', onclick: () => { const v = parseFloat(String(bpmField.value).replace(',', '.')); if (onBpmSet && onBpmSet(v) !== false) bpmEdit.hidden = true; } }, 'Applica'),
-    domEl('button', { type: 'button', class: 'btn small', onclick: () => { if (onTap) onTap(); } }, 'Tap tempo'),
+    applyBtn,
+    tapBtn2,
     domEl('button', { type: 'button', class: 'btn small', onclick: () => { bpmEdit.hidden = true; } }, 'Chiudi'));
   function toggleBpmEdit() {
     bpmEdit.hidden = !bpmEdit.hidden;
@@ -219,7 +223,15 @@ export function createPlayPanel(song, { onLoopExit = null, onPlayPause, onStop, 
     },
     // data: { state, countdown, event, nextEvent, beatsLeft, beatInBar, progress, bpm, strum, strumCell, firstColor }
     update(d) {
-      if (d.state === 'counting') {
+      cur.classList.toggle('gap', !!d.gap);
+      curGap.hidden = !d.gap;
+      if (d.gap) {
+        curGap.textContent = `Riprende tra ${d.gap.left} s${d.gap.label ? ` con «${d.gap.label}»` : ''}`;
+        curName.classList.remove('count');
+        curName.textContent = 'Fuori dal foglio';
+        curName.style.removeProperty('--cc');
+        setDiagram(curDg, null);
+      } else if (d.state === 'counting') {
         curName.textContent = String(d.countdown);
         curName.style.removeProperty('--cc');
         curName.classList.add('count');
@@ -260,7 +272,8 @@ export function createPlayPanel(song, { onLoopExit = null, onPlayPause, onStop, 
       bpmNote.hidden = !text;
     },
     setBpmLocked(locked) {
-      bpmMinus.disabled = bpmPlus.disabled = !!locked;
+      // − / +, the number field with «Applica» and both tap tempo buttons: the times come from the audio
+      bpmMinus.disabled = bpmPlus.disabled = bpmField.disabled = applyBtn.disabled = tapBtn.disabled = tapBtn2.disabled = !!locked;
       lockNote.hidden = !locked;
       if (locked) bpmEdit.hidden = true;
     },

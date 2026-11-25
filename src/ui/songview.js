@@ -4,6 +4,7 @@ import { domEl, domClear } from './dom.js';
 import { renderSongBody, formatBpm } from '../render.js';
 import { saveSong, deleteSong } from '../storage.js';
 import { buildTimeline } from '../timeline.js';
+import { GAP_MIN_SEC } from '../alignment.js';
 import { createPlayer } from '../player.js';
 import { createAudioPlayer } from '../audio.js';
 import { audioTimelineOptions, formatClock } from '../audiosync.js';
@@ -573,12 +574,12 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
 
   // ---- playback highlight ----
   // `startEvent` >= 0 while counting in: nothing is current yet, that chord is the next one.
-  function applyEvent(i, startEvent) {
+  function applyEvent(i, startEvent, nextOverride = -1) {
     const counting = startEvent >= 0;
     if (curEl) curEl.classList.remove('cur');
     if (nextEl) nextEl.classList.remove('next');
     curEl = !counting && i >= 0 ? evEl[i] : null;
-    nextEl = (counting ? evEl[startEvent] : evEl[i + 1]) || null;
+    nextEl = (counting ? evEl[startEvent] : nextOverride >= 0 ? evEl[nextOverride] : evEl[i + 1]) || null;
     if (curEl) {
       curEl.classList.add('cur');
       curEl.style.setProperty('--p', '0');
@@ -621,18 +622,23 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
     gapp.player.timeSec = info.timeSec;
     gapp.player.eventIndex = info.eventIndex;
     gapp.player.beatIndex = info.beatIndex;
-    const key = `${info.state}|${info.eventIndex}|${info.beatIndex}|${info.countdown}`;
-    const ev = info.eventIndex >= 0 ? timeline.events[info.eventIndex] : null;
+    // inside a stretch of music that is not in the sheet (3 s or more): no chord is current, the panel counts down
+    const gap = info.state !== 'counting' && timeline.gaps ? timeline.gaps.find((g) => g.endSec - g.startSec >= GAP_MIN_SEC && info.timeSec >= g.startSec && info.timeSec < g.endSec) : null;
+    const eventIndex = gap ? -1 : info.eventIndex;
+    const afterGap = gap ? timeline.events.findIndex((e) => !e.skipped && e.startSec >= gap.endSec - 1e-3) : -1;
+    const gapLeft = gap ? Math.max(1, Math.ceil(gap.endSec - info.timeSec - 1e-6)) : 0;
+    const key = `${info.state}|${eventIndex}|${info.beatIndex}|${info.countdown}|${gap ? 'g' + gapLeft : ''}`;
+    const ev = eventIndex >= 0 ? timeline.events[eventIndex] : null;
     if (key !== lastKey) {
       lastKey = key;
-      const evKey = info.eventIndex + (info.state === 'counting' ? 'c' + info.startEvent : '');
+      const evKey = eventIndex + (info.state === 'counting' ? 'c' + info.startEvent : '') + (gap ? 'g' + afterGap : '');
       if (evKey !== lastEvKey) {
         lastEvKey = evKey;
-        applyEvent(info.eventIndex, info.state === 'counting' ? info.startEvent : -1);
+        applyEvent(eventIndex, info.state === 'counting' ? info.startEvent : -1, gap ? afterGap : -1);
       }
-      const nextEvent = info.state === 'counting' ? timeline.events[info.startEvent] : timeline.events[info.eventIndex + 1] || null;
+      const nextEvent = info.state === 'counting' ? timeline.events[info.startEvent] : gap ? timeline.events[afterGap] || null : timeline.events[eventIndex + 1] || null;
       const beat = info.beatIndex >= 0 ? timeline.beats[info.beatIndex] : null;
-      const startEv = info.state === 'counting' ? timeline.events[info.startEvent] : ev || timeline.events[0];
+      const startEv = info.state === 'counting' ? timeline.events[info.startEvent] : ev || (gap && nextEvent) || timeline.events[0];
       const secIdx = startEv ? startEv.sectionIndex : 0;
       const section = song.sections[secIdx];
       const strum = section && section.strumIndex !== null && section.strumIndex !== undefined ? song.strumming[section.strumIndex] : null;
@@ -647,9 +653,10 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
         event: ev,
         nextEvent,
         beatsLeft: ev && beat ? ev.startBeat + ev.beats - beat.index : 0,
+        gap: gap ? { left: gapLeft, label: nextEvent ? evLabel(nextEvent) : '' } : null,
         curLabel: ev ? evLabel(ev) : undefined,
         nextLabel: nextEvent ? evLabel(nextEvent) : undefined,
-        beatInBar: info.state === 'counting' ? timeline.events.length ? perBarIndexFromCountdown(info.countdown) : -1 : beat ? beat.beatInBar : -1,
+        beatInBar: info.state === 'counting' ? timeline.events.length ? perBarIndexFromCountdown(info.countdown) : -1 : beat && !gap ? beat.beatInBar : -1,
         bpm: timeline.sections[secIdx] ? timeline.sections[secIdx].bpm : 80,
         savedBpm: timeline.sections[secIdx] ? timeline.sections[secIdx].savedBpm : undefined,
         strum,
@@ -657,6 +664,7 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
         strumCell,
       });
     }
+    if (gap && lastProgress !== 0) { lastProgress = 0; panel.setProgress(0); }
     if (ev && curEl) {
       const p = Math.min(1, Math.max(0, (info.timeSec - ev.startSec) / ev.durSec));
       if (Math.abs(p - lastProgress) >= 0.005) {
@@ -731,6 +739,7 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
       }
     },
     onTap: () => {
+      if (bpmLocked()) return;
       const bpm = tapTempo.tap(performance.now() / 1000);
       if (bpm === null) return;
       const v = Math.min(BPM_MAX, Math.max(BPM_MIN, Math.round(bpm)));
