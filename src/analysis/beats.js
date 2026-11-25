@@ -2,6 +2,8 @@
 // per-range tempo choice (with octave correction) and dynamic-programming beat tracking
 // (Ellis 2007) inside a range of stable tempo.
 
+import { runSteps } from './steps.js';
+
 export const TEMPO_MIN = 55;
 export const TEMPO_MAX = 210;
 const TEMPO_STEP = 0.5;
@@ -17,7 +19,12 @@ function tempoGrid() {
 // Tempogram: for every window (winSec long, one every hopSec) the "comb-ACF" score of each BPM of
 // the grid: sum of the normalised autocorrelation at 1..4 beat periods.
 // Returns { bpms, times, curves: Float32Array(windows * bpms.length) }.
-export function tempoCurves(onset, fps, { winSec = 10, hopSec = 2 } = {}) {
+export function tempoCurves(onset, fps, opts = {}) {
+  return runSteps(tempoCurvesSteps(onset, fps, opts));
+}
+
+// Same as a generator (yields after every window: a 9 minute song is 260 of them).
+export function* tempoCurvesSteps(onset, fps, { winSec = 10, hopSec = 2 } = {}) {
   const bpms = tempoGrid();
   const nb = bpms.length;
   const W = Math.round(winSec * fps);
@@ -31,6 +38,7 @@ export function tempoCurves(onset, fps, { winSec = 10, hopSec = 2 } = {}) {
   const x = new Float64Array(W);
   const acf = new Float64Array(maxLag + 2);
   for (let w = 0; w < nWin; w++) {
+    if (w > 0 && (w & 1) === 0) yield;
     const s0 = w * hop;
     times[w] = (s0 + W / 2) / fps;
     let mean = 0;

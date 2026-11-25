@@ -3,7 +3,7 @@
 
 import { resampleMono, computeFeaturesSteps, FEATURE_RATE } from './features.js';
 import { runSteps } from './steps.js';
-import { tempoCurves, curveOfRange, pickTempo, trackBeats, summariseBeats } from './beats.js';
+import { tempoCurvesSteps, curveOfRange, pickTempo, trackBeats, summariseBeats } from './beats.js';
 import { alignEventsSteps, snapToOnsets, snapToBeats, gridBonusFrames, chordTemplate, shiftedTemplate } from './align.js';
 import { freeBoundary, FREE_CONF_MAX } from './refine.js';
 import { estimateSongDurations } from '../durations.js';
@@ -114,7 +114,7 @@ export function* analyseAndAlignSteps({ samples, sampleRate, song, onProgress = 
   if (!al) return null;
   const N = events.length;
   const hints = effectiveSectionBpms(song);
-  const tg = tempoCurves(feat.onset, feat.onsetFps);
+  const tg = yield* tempoCurvesSteps(feat.onset, feat.onsetFps);
   yield;
   let { startSec, endSec, sections, eventBeats, grids, confidence, gaps, skipped } = yield* describe(al);
   let finalAl = al;
@@ -176,7 +176,9 @@ export function* analyseAndAlignSteps({ samples, sampleRate, song, onProgress = 
       // tempo: the part of the section after its first beat of settling
       const a = secStart + Math.min(1.5, (secEnd - secStart) * 0.1);
       const curve = curveOfRange(tg, a, secEnd);
+      yield;
       const pick = pickTempo(tg.bpms, curve, { hints: [hints[si]] });
+      yield;
       let bpm = null;
       let beatGrid = false;
       let beatTimes = null;
@@ -184,6 +186,7 @@ export function* analyseAndAlignSteps({ samples, sampleRate, song, onProgress = 
       let reg = 0;
       if (secEnd - secStart >= 6) {
         const tb = trackBeats(feat.onset, feat.onsetFps, a, secEnd, pick.bpm);
+        yield;
         const sm = summariseBeats(tb.times);
         reg = sm.regularity;
         if (sm.bpm && Math.abs(sm.bpm / pick.bpm - 1) < 0.06 && pick.conf >= BPM_CONF_MIN && reg >= BPM_REGULARITY_MIN) {
@@ -200,6 +203,7 @@ export function* analyseAndAlignSteps({ samples, sampleRate, song, onProgress = 
       if (!beatGrid && opts.refine !== false) {
         const tpl = (j) => { const t = events[j].rest ? null : chordTemplate(events[j].name); return t ? shiftedTemplate(t, ((a0.shift % 12) + 12) % 12) : null; };
         for (let k = 0; k < idx.length; k++) {
+          if ((k & 3) === 3) yield;
           const j = idx[k];
           const next = tpl(j);
           if (!next) continue;

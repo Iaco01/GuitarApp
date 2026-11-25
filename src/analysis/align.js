@@ -26,7 +26,7 @@ const SKIP_MID = 12;
 const TAIL_LEFT_FRAC = 0.35;
 const MARGIN_SHIFTS = [0.25, 0.5, 1];
 // inner-loop steps of the Viterbi between two yields (about 5-10 ms of work in Node)
-const VITERBI_SLICE_WORK = 1.5e6;
+const VITERBI_SLICE_WORK = 0.2e6;
 
 const mod12 = (n) => ((n % 12) + 12) % 12;
 
@@ -205,6 +205,7 @@ function* viterbi({ cumE, cumG, cumG0 = null, T, chordOf, N, stride, lo, hi, dmi
       from = start;
     }
     const last = j === N - 1;
+    let inner = 0;
     for (let u = lo[j]; u <= Math.min(U, hi[j]); u++) {
       let best = -Infinity;
       let arg = -1;
@@ -221,6 +222,9 @@ function* viterbi({ cumE, cumG, cumG0 = null, T, chordOf, N, stride, lo, hi, dmi
         cur[u] = best + (last ? 0 : kappa * (bonus ? bonus[u * stride] : 0));
         back[j * (U + 1) + u] = arg;
       }
+      // (one event can be long: give the page back inside it too)
+      inner += dhi - dlo + 1;
+      if (inner > VITERBI_SLICE_WORK) { inner = 0; yield; }
     }
     const t = prev; prev = cur; cur = t;
     if (segEnd[j] >= 0) {
@@ -408,11 +412,18 @@ export function* alignEventsSteps(feat, events, options = {}) {
     const em = yield* emissions(feat, chordSet.chords, shift, options.gChroma ?? G_CHROMA, options.gBass ?? G_BASS);
     yield;
     const cumE = cumulative(em.em, em.D, T);
+    yield;
     const cumG = new Float64Array(T + 1);
     const cumG0 = new Float64Array(T + 1);
+    // best chord of every frame (chord by chord: sequential reads)
+    const best = new Float32Array(T).fill(-Infinity);
+    for (let c = 0; c < em.D; c++) {
+      const base = c * T;
+      for (let t = 0; t < T; t++) if (em.em[base + t] > best[t]) best[t] = em.em[base + t];
+      if ((c & 7) === 7) yield;
+    }
     for (let t = 0; t < T; t++) {
-      let m = -Infinity;
-      for (let c = 0; c < em.D; c++) if (em.em[c * T + t] > m) m = em.em[c * T + t];
+      const m = best[t];
       cumG[t + 1] = cumG[t] + (Number.isFinite(m) ? Math.max(0, m - (options.gapFrame ?? GAP_FRAME)) : 0);
       cumG0[t + 1] = cumG0[t] + (Number.isFinite(m) ? Math.max(0, m - (options.introFrame ?? INTRO_FRAME)) : 0);
     }
@@ -494,11 +505,14 @@ export function* alignEventsSteps(feat, events, options = {}) {
   const startFrame = Array.from(res.starts, (u) => u * stride);
   const endFrame = Array.from(res.ends, (u) => u * stride);
   // confidence per event
+  yield;
   const cumCos = cumulative(fin.em.cos, fin.em.D, T);
+  yield;
   const Tp = T + 1;
   const confidence = new Float64Array(N);
   const skipped = Array.from(res.skipped || new Uint8Array(N), (v) => !!v);
   for (let j = 0; j < N; j++) {
+    if ((j & 7) === 7) yield;
     const c = chordSet.chordOf[j];
     const a = startFrame[j];
     const b = endFrame[j];
@@ -520,6 +534,7 @@ export function* alignEventsSteps(feat, events, options = {}) {
   const segOf = (j, a, b) => (chordSet.chordOf[j] >= 0 ? fin.cumE[chordSet.chordOf[j] * Tp + b] - fin.cumE[chordSet.chordOf[j] * Tp + a] : 0);
   const sharpness = new Float64Array(N);
   for (let j = 0; j < N; j++) {
+    if ((j & 7) === 7) yield;
     if (skipped[j]) continue;
     const b0 = startFrame[j];
     let pj = j - 1;

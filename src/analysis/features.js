@@ -65,7 +65,7 @@ function* forEachFrame(x, win, hop, nFrames, fn, kMax = win >> 1) {
     fftRealPairMagnitudes(a, b, magA, magB, re, im, kMax);
     fn(t, magA);
     if (t + 1 < nFrames) fn(t + 1, magB);
-    if ((t & 63) === 62) yield;
+    if ((t & 15) === 14) yield;
   }
 }
 
