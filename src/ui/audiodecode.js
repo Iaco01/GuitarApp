@@ -143,7 +143,7 @@ export async function decodeForAnalysis(blob, shouldCancel = () => false) {
 // Runs decoding and analysis. onProgress(fraction, label). shouldCancel() -> true stops it (the promise
 // rejects with Error(AUTOSYNC_CANCELLED)). Resolves { alignment, result, stats } where stats has the
 // times in ms (decodeMs, analyseMs, totalMs) and the longest stretch without giving the page back.
-export async function runAutoSync({ song, blob, onProgress = () => {}, shouldCancel = () => false, sliceMs = 30 }) {
+export async function runAutoSync({ song, blob, onProgress = () => {}, shouldCancel = () => false, sliceMs = 12 }) {
   const t0 = performance.now();
   onProgress(0, 'Decodifico l’audio…');
   let dec;

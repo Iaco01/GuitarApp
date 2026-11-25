@@ -213,14 +213,24 @@ function* viterbi({ cumE, cumG, cumG0 = null, cumGT = null, T, chordOf, N, strid
     for (let u = lo[j]; u <= Math.min(U, hi[j]); u++) {
       let best = -Infinity;
       let arg = -1;
-      for (let d = dlo; d <= dhi; d++) {
-        const u0 = u - d;
-        if (u0 < 0) break;
-        const fp = from[u0];
-        if (fp === -Infinity) continue;
-        const seg = base >= 0 ? cumE[base + u * stride] - cumE[base + u0 * stride] : 0;
-        const v = fp + seg - pen[d - dlo];
-        if (v > best) { best = v; arg = d; }
+      const dEnd = Math.min(dhi, u);
+      if (base >= 0) {
+        // (the hot loop of the whole analysis: the cumulative index moves by one stride per step)
+        const eu = cumE[base + u * stride];
+        let ci = base + (u - dlo) * stride;
+        for (let d = dlo; d <= dEnd; d++, ci -= stride) {
+          const fp = from[u - d];
+          if (fp === -Infinity) continue;
+          const v = fp + (eu - cumE[ci]) - pen[d - dlo];
+          if (v > best) { best = v; arg = d; }
+        }
+      } else {
+        for (let d = dlo; d <= dEnd; d++) {
+          const fp = from[u - d];
+          if (fp === -Infinity) continue;
+          const v = fp - pen[d - dlo];
+          if (v > best) { best = v; arg = d; }
+        }
       }
       if (arg >= 0) {
         cur[u] = best + (last ? 0 : kappa * (bonus ? bonus[u * stride] : 0));
