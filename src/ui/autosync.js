@@ -148,7 +148,7 @@ export function createAutoSyncPanel({ song, getBlob, getPlayer, timelineWith, pe
         domEl('span', { class: 'as-dot', 'aria-hidden': 'true' }),
         domEl('div', { class: 'as-info' },
           domEl('div', { class: 'as-top' }, domEl('span', { class: 'as-name' }, secName(si)), domEl('span', { class: 'as-time' }, formatClock(tsec ? tsec.startSec : 0))),
-          domEl('div', { class: 'as-sub' }, `${AS_STATE_TEXT[st]} · ${s.bpm === null ? 'tempo libero' : formatBpm(s.bpm) + ' BPM'} · ${idx[si].length} accordi`)),
+          domEl('div', { class: 'as-sub' }, `${AS_STATE_TEXT[st]} · ${s.bpm === null ? 'tempo libero' : formatBpm(s.bpm) + ' BPM'}`)),
         domEl('button', { type: 'button', class: 'btn icon as-act', 'data-act': 'listen', 'aria-label': `Ascolta ${secName(si)}`, title: 'Ascolta', onclick: () => listenFrom((tsec ? tsec.startSec : 0) - 1) }, '▶'),
         domEl('button', {
           type: 'button', class: 'btn icon as-act' + (st === 'yellow' || st === 'red' ? ' primary' : ''), 'data-act': 'correct', 'aria-label': `Correggi a orecchio ${secName(si)}`, title: 'Correggi a orecchio',
