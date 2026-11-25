@@ -64,3 +64,22 @@ export function suspiciousDurations(durations) {
   const median = sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
   return durations.map((d) => d >= 2 * median || d <= median / 2);
 }
+
+// Taps made on "Cambio!" while a stretch of audio plays -> start times of the chords of that stretch.
+//   tapTimesSec: display time of every tap (device latency already compensated by the player);
+//   reactionSec: average reaction delay of the person, subtracted from every tap (default 0);
+//   eventCount: how many chord starts are expected; minGapSec: a tap closer than this to the previous
+//   accepted one is a double tap and is ignored.
+// Returns { starts (taps in order, reaction removed), count, ignored, ok } with ok = (count === eventCount).
+export function tapsToStarts({ tapTimesSec, eventCount, reactionSec = 0, minGapSec = 0.15 }) {
+  const taps = tapTimesSec.slice().sort((a, b) => a - b);
+  const starts = [];
+  let ignored = 0;
+  let prevRaw = -Infinity;
+  for (const t of taps) {
+    if (t - prevRaw < minGapSec) { ignored++; continue; }
+    prevRaw = t;
+    starts.push(t - reactionSec);
+  }
+  return { starts, count: starts.length, ignored, ok: starts.length === eventCount };
+}

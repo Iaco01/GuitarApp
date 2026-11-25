@@ -107,7 +107,7 @@ async function runReal(label, profile) {
     const g = window.__gapp; const out = []; let last = -2; const t0 = performance.now();
     (function loop() {
       if (g.player.eventIndex !== last) { last = g.player.eventIndex; out.push([last, performance.now()]); }
-      if (performance.now() - t0 < 9000) requestAnimationFrame(loop); else resolve({ out, ev: g.timeline.events.map((e) => e.durSec) });
+      if (performance.now() - t0 < 16000) requestAnimationFrame(loop); else resolve({ out, ev: g.timeline.events.map((e) => e.durSec) });
     })();
   }));
   const diffs = [];

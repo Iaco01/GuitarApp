@@ -190,3 +190,9 @@ export function firstChordOffsetSec(song) {
   const ev = tl.events.find((e) => !e.rest);
   return ev ? ev.startSec : 0;
 }
+
+// Options for buildTimeline when the song plays with its audio: anchors, and the automatic alignment if any.
+export function audioTimelineOptions(song) {
+  const audio = song.audio;
+  return { speed: 1, anchors: audioAnchors(audio), alignment: audio && audio.alignment ? audio.alignment : null };
+}

@@ -62,6 +62,8 @@ export function stripAudio(song) {
   for (const [k, v] of Object.entries(song.audio)) {
     if (k === 'anchors' && v && typeof v === 'object' && !Array.isArray(v)) {
       meta.anchors = Object.fromEntries(Object.entries(v).filter(([, t]) => typeof t === 'number' && Number.isFinite(t)));
+    } else if (k === 'alignment' && v && typeof v === 'object' && !Array.isArray(v)) {
+      meta.alignment = v; // plain numbers and names, normalised again on import
     } else if (v === null || typeof v === 'number' || typeof v === 'boolean' || (typeof v === 'string' && v.length <= 200)) meta[k] = v;
   }
   return { ...song, audio: meta };

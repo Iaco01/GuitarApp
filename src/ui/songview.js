@@ -6,7 +6,7 @@ import { saveSong, deleteSong } from '../storage.js';
 import { buildTimeline } from '../timeline.js';
 import { createPlayer } from '../player.js';
 import { createAudioPlayer } from '../audio.js';
-import { audioAnchors, formatClock } from '../audiosync.js';
+import { audioTimelineOptions, formatClock } from '../audiosync.js';
 import { audioStoreGet, audioStoreDelete } from '../audiostore.js';
 import { getDevice } from '../storage.js';
 import { openSyncScreen } from './syncscreen.js';
@@ -122,7 +122,7 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
     plainTimeline = buildTimeline(song, { speed });
     metroPlayer.setTimeline(plainTimeline);
     if (player === audioPlayer && audioPlayer) {
-      timeline = buildTimeline(song, { speed: 1, anchors: audioAnchors(song.audio) });
+      timeline = buildTimeline(song, audioTimelineOptions(song));
       audioPlayer.setTimeline(timeline);
     } else {
       timeline = plainTimeline;
@@ -171,7 +171,7 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
     }
     const lat = getDevice().latencyMs;
     audioPlayer = createAudioPlayer({
-      timeline: buildTimeline(song, { speed: 1, anchors: audioAnchors(song.audio) }),
+      timeline: buildTimeline(song, audioTimelineOptions(song)),
       blob,
       latencyMs: Number.isFinite(lat) ? lat : 0,
       onFrame: (info) => onFrame(info),

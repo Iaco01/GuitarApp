@@ -2,6 +2,7 @@
 // Times are computed section by section with the effective BPM; `speed` (0.5-1) stretches time.
 
 import { effectiveSectionBpms } from './model.js';
+import { alignmentFits, effectiveEventTimes } from './alignment.js';
 
 // Keeps the anchors (section index -> seconds into the audio) that are usable: finite, for an
 // existing section and strictly increasing with the section index. Others are dropped with a
@@ -27,15 +28,21 @@ export function usableAnchors(anchors, sectionCount) {
   return { valid, warnings };
 }
 
+// With `alignment` (song.audio.alignment, audio mode only) every event starts at its aligned instant: the
+// beats of an event are spread evenly between its start and the next one, so the highlight follows the
+// real timing, free-tempo stretches included. Anchors of sections 1.. then move their section (see
+// effectiveEventTimes); the anchor of section 0 is not used (the alignment carries its own start).
+//
 // `anchors` ({ [sectionIndex]: sec }) pins sections to instants of the audio: an anchored section
 // starts exactly there. Between two consecutive anchors the sections are scaled uniformly (one factor,
 // same for all of them) so that they fill the stretch exactly: no gap, no jump. After the last anchor
 // the saved tempos apply. Without anchors: round 2 times. Each timeline section reports the effective
 // `bpm` (scaled) and the saved one as `savedBpm`.
-export function buildTimeline(song, { speed = 1, anchors = null } = {}) {
+export function buildTimeline(song, { speed = 1, anchors = null, alignment = null } = {}) {
   const sp = speed > 0 ? speed : 1;
   const bpms = effectiveSectionBpms(song);
   const perBar = Math.max(1, (song.timeSignature && song.timeSignature[0]) || 4);
+  if (alignment && sp === 1 && alignmentFits(alignment, song)) return buildAlignedTimeline(song, alignment, anchors, bpms, perBar);
   const { valid, warnings } = usableAnchors(anchors, song.sections.length);
   // natural length of every section in seconds at its tempo
   const nat = song.sections.map((sec, si) => {
@@ -104,6 +111,47 @@ export function buildTimeline(song, { speed = 1, anchors = null } = {}) {
   return { events, beats, sections, totalBeats: beatCursor, totalSec: secCursor, speed: sp, warnings };
 }
 
+function buildAlignedTimeline(song, alignment, anchors, bpms, perBar) {
+  const { starts, endSec, warnings } = effectiveEventTimes(song, alignment, anchors);
+  const N = starts.length;
+  const events = [];
+  const beats = [];
+  const sections = [];
+  let beatCursor = 0;
+  let k = 0;
+  let prevEnd = 0;
+  song.sections.forEach((sec, si) => {
+    const startBeat = beatCursor;
+    const first = k;
+    sec.lines.forEach((line, li) => {
+      line.chords.forEach((c, ci) => {
+        const n = Math.max(1, Math.round(Number(c.beats) || 1));
+        const rel = beatCursor - startBeat;
+        const start = starts[k];
+        const end = k + 1 < N ? starts[k + 1] : endSec;
+        const dur = Math.max(end - start, 1e-3);
+        const spb = dur / n;
+        const eventIndex = events.length;
+        events.push({ ref: `${si}.${li}.${ci}`, name: c.name, mark: c.mark || '', rest: !!c.rest, sectionIndex: si, startBeat: beatCursor, beats: n, startSec: start, durSec: dur, bpm: 60 / spb });
+        for (let b = 0; b < n; b++) {
+          beats.push({ index: beatCursor + b, timeSec: start + b * spb, spb, sectionIndex: si, eventIndex, beatInBar: (rel + b) % perBar, isDownbeat: (rel + b) % perBar === 0 });
+        }
+        beatCursor += n;
+        k++;
+      });
+    });
+    const count = beatCursor - startBeat;
+    const secStart = k > first ? starts[first] : prevEnd;
+    const secEnd = k > first ? (k < N ? starts[k] : endSec) : prevEnd;
+    prevEnd = secEnd;
+    const dur = Math.max(secEnd - secStart, 1e-3);
+    const spb = count > 0 ? dur / count : 60 / bpms[si];
+    const bpm = 60 / spb;
+    sections.push({ index: si, startSec: secStart, endSec: secEnd, startBeat, endBeat: beatCursor, bpm, savedBpm: bpms[si], scale: bpms[si] / bpm, spb, anchored: !!(anchors && si > 0 && Number.isFinite(anchors[si])), aligned: true });
+  });
+  return { events, beats, sections, totalBeats: beatCursor, totalSec: endSec, speed: 1, warnings, aligned: true };
+}
+
 // Greatest index i with list[i][key] <= value, or -1.
 function lastAtOrBefore(list, key, value) {
   let lo = 0;
@@ -135,6 +183,11 @@ function secPerBeatOfSection(timeline, sectionIndex) {
   return timeline.sections[sectionIndex].spb;
 }
 
+// Seconds per beat at beat `b` (aligned timelines have a different one for every event).
+function spbOfBeat(timeline, b) {
+  return b.spb !== undefined ? b.spb : secPerBeatOfSection(timeline, b.sectionIndex);
+}
+
 // Fractional beat position (0 = first beat of the song) at `sec`; negative before the start and
 // extrapolated at the last tempo after the end. Independent of `speed`.
 export function beatPositionAtTime(timeline, sec) {
@@ -142,7 +195,7 @@ export function beatPositionAtTime(timeline, sec) {
   const idx = beatIndexAtTime(timeline, sec);
   const i = Math.max(0, idx);
   const b = timeline.beats[i];
-  const spb = secPerBeatOfSection(timeline, b.sectionIndex);
+  const spb = spbOfBeat(timeline, b);
   const frac = (sec - b.timeSec) / spb;
   return b.index + (idx === -1 ? frac : Math.min(frac, 1 - 1e-12));
 }
@@ -152,5 +205,5 @@ export function timeAtBeatPosition(timeline, pos) {
   if (timeline.beats.length === 0) return 0;
   const i = Math.min(timeline.beats.length - 1, Math.max(0, Math.floor(pos)));
   const b = timeline.beats[i];
-  return b.timeSec + (pos - b.index) * secPerBeatOfSection(timeline, b.sectionIndex);
+  return b.timeSec + (pos - b.index) * spbOfBeat(timeline, b);
 }

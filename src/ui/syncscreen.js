@@ -8,7 +8,7 @@ import { effectiveSectionBpms } from '../model.js';
 import { audioStoreGet } from '../audiostore.js';
 import { getDevice } from '../storage.js';
 import { formatBpm } from '../render.js';
-import { audioAnchors, formatClock, setAnchor, removeAnchor, suggestSectionBpms, applyBpmSuggestion, listenFromSec, firstChordOffsetSec } from '../audiosync.js';
+import { audioAnchors, audioTimelineOptions, formatClock, setAnchor, removeAnchor, suggestSectionBpms, applyBpmSuggestion, listenFromSec, firstChordOffsetSec } from '../audiosync.js';
 import { openAnchorSheet } from './anchorsheet.js';
 import { attachAudioFile, removeAudioFile, AUDIO_ACCEPT } from './audiofile.js';
 import { openCalibration } from './calibrate.js';
@@ -29,7 +29,7 @@ export function openSyncScreen({ song, persist, onClose, blob = null }) {
 
   const sectionName = (i) => song.sections[i].name || `Sezione ${i + 1}`;
   const latencyMs = () => (Number.isFinite(getDevice().latencyMs) ? getDevice().latencyMs : 0);
-  const buildTl = () => buildTimeline(song, { speed: 1, anchors: audioAnchors(song.audio) });
+  const buildTl = () => buildTimeline(song, audioTimelineOptions(song));
 
   const posLbl = domEl('div', { class: 'sync-pos', id: 'sync-pos', 'aria-live': 'off' }, '0:00,0');
   const scrub = domEl('input', {

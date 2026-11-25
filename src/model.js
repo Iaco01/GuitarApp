@@ -1,6 +1,7 @@
 // Song model: creation, validation, migration and small helpers (pure).
 
 import { estimateSongDurations } from './durations.js';
+import { normalizeAlignment } from './alignment.js';
 
 export const SONG_SCHEMA_VERSION = 3;
 export const DEFAULT_BPM = 80;
@@ -352,6 +353,8 @@ export function normalizeAudio(raw) {
     addedAt: typeof raw.addedAt === 'string' ? raw.addedAt : '',
   };
   if (Number.isFinite(raw.endSec) && raw.endSec > out.offsetSec) out.endSec = raw.endSec;
+  const alignment = normalizeAlignment(raw.alignment);
+  if (alignment) out.alignment = alignment;
   if (raw.anchors && typeof raw.anchors === 'object') {
     for (const [k, v] of Object.entries(raw.anchors)) {
       if (Number.isInteger(Number(k)) && Number(k) > 0 && Number.isFinite(v) && v >= 0) out.anchors[Number(k)] = v;
