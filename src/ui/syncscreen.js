@@ -12,6 +12,8 @@ import { audioAnchors, audioTimelineOptions, formatClock, setAnchor, removeAncho
 import { openAnchorSheet } from './anchorsheet.js';
 import { attachAudioFile, removeAudioFile, AUDIO_ACCEPT } from './audiofile.js';
 import { openCalibration } from './calibrate.js';
+import { createAutoSyncPanel } from './autosync.js';
+import { alignmentFits } from '../alignment.js';
 
 const SYNC_FINE_MS = [-50, -10, 10, 50];
 const SYNC_BPM_STEP = 0.5;
@@ -31,6 +33,11 @@ export function openSyncScreen({ song, persist, onClose, blob = null }) {
   const latencyMs = () => (Number.isFinite(getDevice().latencyMs) ? getDevice().latencyMs : 0);
   const buildTl = () => buildTimeline(song, audioTimelineOptions(song));
 
+  const frameListeners = new Set();
+  const addFrameListener = (fn) => {
+    frameListeners.add(fn);
+    return () => frameListeners.delete(fn);
+  };
   const posLbl = domEl('div', { class: 'sync-pos', id: 'sync-pos', 'aria-live': 'off' }, '0:00,0');
   const scrub = domEl('input', {
     type: 'range', id: 'sync-scrub', min: '0', max: '1', step: '0.1', value: '0', 'aria-label': 'Posizione nell’audio',
@@ -55,7 +62,7 @@ export function openSyncScreen({ song, persist, onClose, blob = null }) {
       changed = true;
       persist();
       currentBlob = file;
-      setMsg(r.kept ? 'Audio sostituito: inizio e ancore conservati.' : 'Audio caricato. Ora fissa l’inizio del primo accordo.');
+      setMsg(r.kept ? 'Audio sostituito: inizio e ancore conservati.' : 'Audio caricato. Premi «Sincronizza automaticamente» (oppure fissa l’inizio a mano, più in basso).');
       makePlayer();
       render();
     },
@@ -78,7 +85,7 @@ export function openSyncScreen({ song, persist, onClose, blob = null }) {
       timeline: buildTl(),
       blob: currentBlob,
       latencyMs: latencyMs(),
-      onFrame: paintPos,
+      onFrame: (info) => { for (const f of frameListeners) f(info); paintPos(info); },
       onState: (st) => {
         playBtn.textContent = st === 'playing' ? 'Pausa' : 'Play';
         if (st !== 'playing' && listening) {
@@ -147,6 +154,20 @@ export function openSyncScreen({ song, persist, onClose, blob = null }) {
     player.playFromTime(Math.max(0, sec));
   }
 
+  const auto = createAutoSyncPanel({
+    song,
+    getBlob: () => currentBlob,
+    getPlayer: () => player,
+    timelineWith: (al) => buildTimeline(song, { ...audioTimelineOptions(song), alignment: al === null ? (song.audio && song.audio.alignment) || null : al }),
+    persist: () => { changed = true; persist(); },
+    rebuild: () => { rebuildTl(); render(); },
+    setMsg,
+    addFrameListener,
+    onChange: () => paintBar(),
+  });
+  addFrameListener((info) => auto.onFrame(info));
+  const isAligned = () => !!(song.audio && song.audio.alignment && alignmentFits(song.audio.alignment, song));
+
   // ---- dynamic part ----
   function render() {
     domClear(dyn);
@@ -181,6 +202,8 @@ export function openSyncScreen({ song, persist, onClose, blob = null }) {
     dyn.append(fileBox);
     paintBar();
     if (!audio || !currentBlob) return;
+    dyn.append(auto.el);
+    auto.refresh();
 
     // latency
     const lat = getDevice().latencyMs;
@@ -195,12 +218,17 @@ export function openSyncScreen({ song, persist, onClose, blob = null }) {
         },
       }, 'Calibra la latenza')));
 
+    // manual sync: the fallback (open while there is no automatic alignment)
+    const manual = domEl('details', { class: 'sync-manual', id: 'sync-manual', open: !isAligned() },
+      domEl('summary', { class: 'sync-manual-sum' }, 'Sincronizzazione manuale (ripiego)'));
+    dyn.append(manual);
+
     // 2. offset
     const fine = domEl('div', { class: 'row sync-fine' }, SYNC_FINE_MS.map((d) => domEl('button', {
       type: 'button', class: 'btn', 'data-ms': d, 'aria-label': `${d > 0 ? '+' : '−'}${Math.abs(d)} millisecondi`,
       onclick: () => setAnchorAt(0, Math.max(0, audio.offsetSec + d / 1000)),
     }, `${d > 0 ? '+' : '−'}${Math.abs(d)}`)));
-    dyn.append(domEl('section', { class: 'sync-box', id: 'sync-offset-box' },
+    manual.append(domEl('section', { class: 'sync-box', id: 'sync-offset-box' },
       domEl('h3', null, '2. Inizio'),
       domEl('p', { class: 'muted' }, 'Premi Play e, appena senti il primo accordo, tocca «Primo accordo!» nella barra in basso. Se il brano comincia con una pausa, conta dal primo accordo vero.'),
       domEl('p', { class: 'sync-offset', id: 'sync-offset' }, `Inizio: ${formatClock(audio.offsetSec)} (${Math.round(audio.offsetSec * 1000)} ms)`),
@@ -232,7 +260,7 @@ export function openSyncScreen({ song, persist, onClose, blob = null }) {
           domEl('button', { type: 'button', class: 'btn small', 'data-act': 'bpm-', 'aria-label': 'BPM meno 0,5', onclick: () => { stepBpm(i, -SYNC_BPM_STEP); } }, '−0,5'),
           domEl('button', { type: 'button', class: 'btn small', 'data-act': 'bpm+', 'aria-label': 'BPM più 0,5', onclick: () => { stepBpm(i, SYNC_BPM_STEP); } }, '+0,5'))));
     });
-    dyn.append(domEl('section', { class: 'sync-box', id: 'sync-anchors-box' },
+    manual.append(domEl('section', { class: 'sync-box', id: 'sync-anchors-box' },
       domEl('h3', null, '3. Sezioni (facoltativo)'),
       domEl('p', { class: 'muted' }, 'Se il brano cambia tempo o la registrazione “scivola”, segna l’inizio di ogni sezione mentre ascolti.'),
       nextIdx >= n ? domEl('p', { class: 'muted small' }, 'Tutte le sezioni sono state fissate.') : domEl('p', { class: 'muted small' }, 'Mentre ascolti, tocca «⚓ …» nella barra in basso all’inizio di ogni sezione.'),
@@ -269,7 +297,7 @@ export function openSyncScreen({ song, persist, onClose, blob = null }) {
           onclick: () => { applyBpmSuggestion(song, s); rebuildTl(); render(); },
         }, 'Applica')));
     }
-    dyn.append(domEl('section', { class: 'sync-box', id: 'sync-sug-box' }, domEl('h3', null, '4. Tempo'), list));
+    manual.append(domEl('section', { class: 'sync-box', id: 'sync-sug-box' }, domEl('h3', null, '4. Tempo'), list));
   }
 
   function suggestionText(s) {
@@ -308,8 +336,9 @@ export function openSyncScreen({ song, persist, onClose, blob = null }) {
     type: 'button', class: 'btn', id: 'sync-more-btn', 'aria-label': 'Altri comandi', 'aria-expanded': 'false', 'aria-controls': 'sync-more',
     onclick: () => { moreBox.hidden = !moreBox.hidden; moreBtn.setAttribute('aria-expanded', String(!moreBox.hidden)); overlay.style.setProperty('--sync-bar-h', bar.offsetHeight + 'px'); },
   }, '⋯');
+  const bigRow = domEl('div', { class: 'sync-big-row' }, firstBtn, nextBtn);
   const bar = domEl('div', { class: 'sync-transport', id: 'sync-transport', hidden: true },
-    domEl('div', { class: 'sync-big-row' }, firstBtn, nextBtn),
+    bigRow,
     domEl('div', { class: 'sync-trow' },
       domEl('button', { type: 'button', class: 'btn', id: 'sync-back5', 'aria-label': '5 secondi indietro', onclick: () => { if (player) player.seek(Math.max(0, now() - SYNC_SKIP_SEC)); } }, '−5 s'),
       playBtn,
@@ -320,6 +349,7 @@ export function openSyncScreen({ song, persist, onClose, blob = null }) {
 
   function paintBar() {
     bar.hidden = !(song.audio && currentBlob);
+    bigRow.hidden = isAligned(); // "Primo accordo!" and the section anchors are the manual way
     overlay.style.setProperty('--sync-bar-h', bar.hidden ? '0px' : bar.offsetHeight + 'px');
     const n = song.sections.length;
     if (nextIdx >= n) {

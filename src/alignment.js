@@ -55,6 +55,7 @@ export function makeAlignment(result, song, createdAt = new Date().toISOString()
     transposeFound: result.transposeFound || 0,
     tuningCents: Math.round((result.tuningCents || 0) * 10) / 10,
     shiftSec: 0,
+    accepted: false,
     createdAt,
   };
 }
@@ -84,6 +85,7 @@ export function normalizeAlignment(raw) {
     transposeFound: Number.isInteger(raw.transposeFound) ? raw.transposeFound : 0,
     tuningCents: Number.isFinite(raw.tuningCents) ? raw.tuningCents : 0,
     shiftSec: Number.isFinite(raw.shiftSec) ? Math.max(-5, Math.min(5, raw.shiftSec)) : 0,
+    accepted: !!raw.accepted,
     createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : '',
   };
 }
