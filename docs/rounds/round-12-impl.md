@@ -87,3 +87,22 @@ I bug 6, 8 e 12 restano aperti: annotali nel report.
   - cosa resta da verificare sul telefono dell'utente;
   - le decisioni in `docs/DECISIONS.md`;
   - una risposta finale di 15 righe al massimo.
+
+## Aggiunta dell'utente (durante il round): il primo G del Chorus 1 "dura tantissimo"
+
+Sul telefono (Android, Firefox, sincronizzazione rifatta) il primo G del Chorus 1 (evento 35) resta acceso a lungo, e da lì in poi gli accordi sembrano in ritardo.
+
+Lettura del coordinatore. L'ultimo accordo del Verse 1 (evento 34) e il primo del Chorus 1 (evento 35) sono **lo stesso accordo, G**. Il G del 34 attacca a ~57,9 s e risuona, spegnendosi, fino a ~63,0 s; il Chorus riattacca a ~63,1–63,4 s. Fra due accordi uguali il croma non dice dove sta il confine: in Node il motore lo mette a 63,43 (giusto), ma basta una piccola differenza nella decodifica (Firefox) perché il confine scivoli a ~58–59 s. Allora la coda del G diventa l'evento 35, che dura ~5 s invece di 0,8, e il resto del Chorus appare sfasato.
+
+Da fare (priorità subito dopo il punto 1.a):
+- **Confine tra due accordi uguali consecutivi** (anche tra sezioni): va sul **riattacco**, cioè l'attacco forte (flusso spettrale) dopo un tratto di energia che cala, nella finestra plausibile. Non sul primo frame utile.
+- **Una coda o un silenzio non vanno mai al primo accordo della sezione successiva**: restano all'accordo che li ha prodotti.
+- **Durata del primo accordo di una sezione coerente con le sorelle**: il primo G dei Chorus dura in battiti quanto negli altri Chorus (1–2 battiti), mai 5 s.
+- **Robustezza**: sul reale, varianti della decodifica
+  - ricampionamento a 11025 e 22050 Hz con filtri diversi (ffmpeg `-af aresample=resampler=soxr` e quello di default);
+  - mono e stereo;
+  - ricodifica a 64 e 128 kbps;
+  - spostamento di ±20 ms;
+  - piccolo rumore.
+
+  In **tutte**, l'evento 35 sta tra 63,0 e 63,6 s e dura meno di 1,5 s. Riporta la tabella per variante e aggiungi un test sul reale (si salta senza la fixture).
