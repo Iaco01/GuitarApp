@@ -441,14 +441,14 @@ h1, h2, h3, p, ul, ol, dl, dd { margin: 0; }
 .corr > * { flex-shrink: 0; }
 .corr-count { font: 800 24px var(--mono); }
 .corr-next { font: 800 20px var(--ui); color: var(--accent); }
-.corr-chips { list-style: none; padding: 0; display: flex; flex-wrap: wrap; gap: 4px; max-height: 26vh; overflow-y: auto; }
+.corr-chips { list-style: none; padding: 0; display: flex; flex-wrap: wrap; gap: 4px; max-height: clamp(70px, 14vh, 130px); overflow-y: auto; }
 .corr-chip { padding: 2px 8px; border: 2px solid var(--line); border-radius: 8px; font: 700 15px var(--mono); color: var(--cc, var(--fg)); }
 .corr-chip.tapped { background: color-mix(in srgb, var(--cc, var(--fg)) 18%, transparent); border-color: var(--cc, var(--fg)); }
 .corr-chip.next { border-color: var(--accent); border-style: dashed; }
 .corr-chip.now { background: var(--cc, var(--accent)); color: var(--bg); }
 .corr-status { font: 600 15px var(--ui); min-height: 22px; }
 .corr-status.error { color: var(--danger); }
-.corr-tap { min-height: min(28vh, 150px); position: sticky; bottom: calc(var(--corr-bar-h, 90px) + 8px); z-index: 3; font: 800 40px var(--ui) !important; touch-action: manipulation; user-select: none; -webkit-user-select: none; flex: 1 0 auto; }
+.corr-tap { min-height: min(20vh, 150px); font: 800 40px var(--ui) !important; touch-action: manipulation; user-select: none; -webkit-user-select: none; flex: 1 0 auto; }
 .corr-react { display: flex; align-items: center; gap: 8px; }
 .corr-react .btn { min-width: 44px; min-height: 44px; }
 .corr-react-val { font: 700 16px var(--mono); min-width: 64px; text-align: center; }
@@ -476,3 +476,16 @@ h1, h2, h3, p, ul, ol, dl, dd { margin: 0; }
 .diag-out { width: 100%; box-sizing: border-box; font: 11px/1.3 monospace; }
 .pp-cur.free .pp-cur-bar { display: none; }
 .pp-cur.free .pp-cur-gap { font-size: 10px; line-height: 12px; }
+
+/* "Correggi a orecchio" on a short screen (round 12): instructions, chips and «Cambio!» all above the fixed bar, nothing covered */
+@media (max-height: 700px) {
+  .corr #corr-intro { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin: 0; }
+  .corr-count { font-size: 20px; }
+  .corr-next { font-size: 16px; }
+  .corr-chips { max-height: 70px; }
+  .corr-status { font-size: 14px; }
+}
+
+/* the four steps of the nudge sheet stay on one row, also at 320 px (round 12) */
+.nudge-sheet .sync-fine { display: flex; flex-wrap: nowrap; gap: 6px; }
+.nudge-sheet .sync-fine .btn { flex: 1 1 0; min-width: 0; padding-left: 4px; padding-right: 4px; font-size: 15px; white-space: nowrap; }
