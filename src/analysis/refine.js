@@ -78,6 +78,32 @@ function attacks(feat, t0, t1) {
   return out;
 }
 
+// Earliest instant in [from, t - LEAD_MIN] where the chroma looks clearly more like the new chord than the old one (by
+// LEAD_DIFF, and still on average over the next 0.3 s), or null. The attack is a little before the chroma shows it.
+const LEAD_MIN = 0.3;
+const LEAD_DIFF = 0.1;
+const LEAD_AVG = 0.08;
+function chromaLead(feat, t, next, prev, from) {
+  if (!prev) return null;
+  const cosAt = (w, f) => {
+    let sd = 0;
+    let n2 = 0;
+    for (let k = 0; k < 12; k++) { const v = feat.chroma[f * 12 + k]; sd += v * w[k]; n2 += v * v; }
+    return sd / (Math.sqrt(n2) + 0.3);
+  };
+  const diff = (f) => cosAt(next.weights, f) - cosAt(prev.weights, f);
+  const f0 = Math.max(0, Math.ceil(from * feat.fps));
+  const f1 = Math.min(feat.frames - 4, Math.floor((t - LEAD_MIN) * feat.fps));
+  const ahead = Math.ceil(0.3 * feat.fps);
+  for (let f = f0; f <= f1; f++) {
+    if (diff(f) < LEAD_DIFF) continue;
+    let m = 0;
+    for (let q = 0; q < ahead; q++) m += diff(f + q);
+    if (m / ahead >= LEAD_AVG) return Math.max(0, f / feat.fps - 0.05);
+  }
+  return null;
+}
+
 // feat: features (fps, frames, chroma, bass, onset, onsetFps). t: the boundary chosen by the alignment (seconds).
 // next: chord of the event ({ bass, weights } already shifted to the recording), prev: chord before it (or null).
 // Returns { t, found: 'bass' | 'attack' | null, strength } (t is `t` itself when nothing better is found).
@@ -100,6 +126,11 @@ export function refineBoundary(feat, t, next, prev, { before = REFINE_BEFORE, af
     }
     const gain = chromaCos(feat, next.weights, a.t + 0.05, a.t + 0.5) - chromaCos(feat, next.weights, a.t - 0.5, a.t - 0.05);
     if (gain > COMPAT_MIN && (!bestCompat || a.strength > bestCompat.strength)) bestCompat = { ...a, gain, rootAfter, rise: rootAfter - rootBefore };
+  }
+  if (!bestCompat) {
+    // no attack at all (a soft arpeggio): the new chord may still stand out in the chroma well before the chosen boundary
+    const c = chromaLead(feat, t, next, prev, Math.max(minT, t - Math.min(before, 0.8)));
+    if (c !== null) return { t: c, found: 'chroma', strength: 0 };
   }
   if (bestCompat) return { t: bestCompat.t, found: 'attack', strength: bestCompat.strength, gain: bestCompat.gain, rootAfter: bestCompat.rootAfter, rise: bestCompat.rise };
   return { t, found: null, strength: 0 };
@@ -135,6 +166,7 @@ export function freeBoundary(feat, tChroma, sharpness, next, prev, bounds = {}) 
     if (ad >= 0.4) return { t: r.t, conf: 0.4, kind: 'tone-big' };
     return { t: tChroma, conf: Math.max(cs, 0.25), kind: 'tone-small' };
   }
+  if (r.found === 'chroma') return { t: r.t, conf: 0.3, kind: 'chroma-lead' };
   if (r.found === 'attack' && ad <= 0.15 && r.strength >= STRUM_STRENGTH) return { t: tChroma, conf: 0.5, kind: 'attack-agree' };
   return { t: tChroma, conf: Math.max(cs, 0.1), kind: 'keep' };
 }

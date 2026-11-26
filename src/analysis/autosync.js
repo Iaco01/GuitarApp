@@ -103,6 +103,40 @@ function lastChordEnd(feat, t) {
   return Math.min(feat.musicEndSec, Math.max(feat.musicEndSec * 0, ((end + 1) / fps)));
 }
 
+// Is the stretch of a gap the decay of the chord before it? Its mean chroma is closer to that chord than to any other chord of
+// the sheet (an echo, a held chord dying out), or the energy has fallen to a few percent of the attack (a pause).
+const GAP_TAIL_COS = 0.7;
+const GAP_SILENT_SHARE = 0.08;
+function gapIsTail(feat, g, events, shift) {
+  const fps = feat.fps;
+  const f0 = Math.max(0, Math.floor(g.startSec * fps));
+  const f1 = Math.min(feat.frames, Math.ceil(g.endSec * fps));
+  if (f1 <= f0) return false;
+  const m = new Float64Array(12);
+  let en = 0;
+  for (let t = f0; t < f1; t++) { for (let c = 0; c < 12; c++) m[c] += feat.chroma[t * 12 + c]; en += feat.energy[t]; }
+  en /= f1 - f0;
+  // level of the chord before it at its attack
+  const a0f = Math.max(0, Math.floor((g.startSec - 1.5) * fps));
+  let att = 0;
+  for (let t = a0f; t < f0 && t < feat.frames; t++) att = Math.max(att, feat.energy[t]);
+  if (att > 0 && en < GAP_SILENT_SHARE * att) return true;
+  const cosOf = (name) => {
+    const tp = events.some((e) => e.name === name) ? chordTemplate(name) : null;
+    if (!tp) return -1;
+    const w = shiftedTemplate(tp, ((shift % 12) + 12) % 12).weights;
+    let sd = 0, a = 0, b = 0;
+    for (let i = 0; i < 12; i++) { sd += w[i] * m[i]; a += w[i] * w[i]; b += m[i] * m[i]; }
+    return sd / Math.sqrt(a * b + 1e-12);
+  };
+  const prev = events[g.prev];
+  if (!prev || prev.rest) return false;
+  const cp = cosOf(prev.name);
+  let best = -1;
+  for (const name of new Set(events.filter((e) => !e.rest).map((e) => e.name))) if (name !== prev.name) best = Math.max(best, cosOf(name));
+  return cp >= GAP_TAIL_COS && cp >= best;
+}
+
 function median(a) {
   const s = a.slice().sort((x, y) => x - y);
   const n = s.length;
@@ -298,7 +332,8 @@ export function* analyseAndAlignSteps({ samples, sampleRate, song, onProgress = 
       }
     };
     // (stretches shorter than GAP_MIN_SEC are not gaps: the previous chord lasts until the next one)
-    const bigGaps = (a0.gaps || []).filter((g) => g.endSec - g.startSec >= GAP_MIN_SEC);
+    // (a stretch that is the tail of the chord before it, or silence, is not music that the sheet lacks: that chord just lasts)
+    const bigGaps = (a0.gaps || []).filter((g) => g.endSec - g.startSec >= GAP_MIN_SEC && !gapIsTail(feat, g, events, a0.shift));
     const gapEnd = new Map(bigGaps.map((g) => [g.prev, g.startSec]));
     // a chord before music that is not in the sheet ends where that music starts: the tempo of its section is measured
     // without the gap
