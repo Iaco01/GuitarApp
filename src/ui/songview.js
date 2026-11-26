@@ -9,7 +9,7 @@ import { createPlayer } from '../player.js';
 import { createAudioPlayer } from '../audio.js';
 import { audioTimelineOptions, formatClock, clampLatencyMs, offsetLabel, OFFSET_STEP_MS } from '../audiosync.js';
 import { audioStoreGet, audioStoreDelete } from '../audiostore.js';
-import { getDevice, saveDevice } from '../storage.js';
+import { getDevice, saveDevice, saveDiag } from '../storage.js';
 import { openSyncScreen } from './syncscreen.js';
 import { openNudgeSheet } from './nudgesheet.js';
 import { openAnchorSheet } from './anchorsheet.js';
@@ -141,6 +141,16 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
   function paintBpmLock() { if (panel) panel.setBpmLocked(bpmLocked()); }
 
   let listenToken = 0;
+  let diagTimer = null;
+  // what the player measures goes to the device storage every 10 s, for the exported technical information
+  function startDiagSaver() {
+    const save = () => {
+      if (!audioPlayer) return;
+      try { saveDiag({ songId: song.id, savedAt: new Date().toISOString(), player: audioPlayer.diagnostics() }); } catch { /* no storage */ }
+    };
+    diagTimer = setInterval(save, 10000);
+    audioPlayer.ready().then(save);
+  }
   function paintOffset() {
     if (!panel) return;
     if (!audioPlayer) { panel.setOffset(null); return; }
@@ -150,9 +160,12 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
 
   // ---- audio file: load from IndexedDB, switch between metronome and audio ----
   function destroyAudioPlayer() {
+    if (diagTimer !== null) clearInterval(diagTimer);
+    diagTimer = null;
     if (audioPlayer) audioPlayer.destroy();
     audioPlayer = null;
     delete gapp.audioEl;
+    delete gapp.audioPlayer;
     paintOffset();
   }
 
@@ -201,6 +214,8 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
     if (player !== audioPlayer) metroPlayer.stop();
     player = audioPlayer;
     gapp.audioEl = audioPlayer.element;
+    gapp.audioPlayer = audioPlayer; // (for tests: seek, media time, diagnostics)
+    startDiagSaver();
     paintOffset();
     audioStatus = 'ready';
     metronomeOn = !!song.audio.metronome;

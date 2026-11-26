@@ -172,3 +172,18 @@ export function getDevice(storage) {
 export function saveDevice(device, storage) {
   writeJson(needStorage(storage), KEY_DEVICE, device);
 }
+
+// ---- diagnostics (round 12): what the audio player measured in the last session, for "Informazioni tecniche" ----
+
+const KEY_DIAG = 'gapp.diag.v1';
+
+export function getDiag(storage) {
+  const st = storage || defaultStorage();
+  if (!st) return null;
+  const d = readJson(st, KEY_DIAG, null);
+  return d && typeof d === 'object' && !Array.isArray(d) ? d : null;
+}
+
+export function saveDiag(diag, storage) {
+  writeJson(needStorage(storage), KEY_DIAG, diag);
+}

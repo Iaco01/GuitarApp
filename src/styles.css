@@ -473,3 +473,4 @@ h1, h2, h3, p, ul, ol, dl, dd { margin: 0; }
 .pp-off-title { font-size: 13px; color: var(--muted); }
 .pp-off-ctl { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .pp-off-val { font-size: 14px; min-width: 9em; text-align: center; }
+.diag-out { width: 100%; box-sizing: border-box; font: 11px/1.3 monospace; }

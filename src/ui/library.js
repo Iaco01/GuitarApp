@@ -1,7 +1,8 @@
 // Library screen: search, sort, list of imported songs, backup (JSON export/import), storage use.
 
 import { domEl, domClear } from './dom.js';
-import { listLibrary, deleteSong, getSettings, saveSettings, storageUsedBytes, getDevice } from '../storage.js';
+import { listLibrary, deleteSong, getSettings, saveSettings, storageUsedBytes, getDevice, getDiag, listSongs, getSong } from '../storage.js';
+import { buildDiagnostics } from '../diagnostics.js';
 import { filterLibrary, sortLibrary, SORT_MODES, buildExport, exportFileName, parseExport, planImport, applyImport } from '../libio.js';
 import { choiceDialog } from './dialog.js';
 import { openCalibration } from './calibrate.js';
@@ -261,6 +262,38 @@ export function showLibraryScreen(root, { onImportFile, message }) {
     latencyNote,
     domEl('div', { class: 'row' },
       domEl('button', { type: 'button', class: 'btn', id: 'btn-calibrate', onclick: () => openCalibration({ onSaved: paintLatency }) }, 'Calibra la latenza')));
+
+  // technical information: a JSON without any text of the song, to send to whoever looks after the app
+  const diagOut = domEl('textarea', { class: 'diag-out', id: 'diag-out', readonly: true, rows: 8, hidden: true, 'aria-label': 'Informazioni tecniche' });
+  const diagMsg = domEl('p', { class: 'muted small', id: 'diag-msg' }, '');
+  async function exportDiagnostics() {
+    try {
+      const stored = getDiag();
+      const idx = listSongs();
+      const withAl = idx.map((e) => getSong(e.id)).filter((s) => s && s.audio && s.audio.alignment);
+      const song = (stored && getSong(stored.songId)) || withAl[0] || null;
+      let audioContext = stored && stored.player ? stored.player.audioContext : null;
+      if (!audioContext && typeof AudioContext === 'function') {
+        try { const c = new AudioContext(); audioContext = { sampleRate: c.sampleRate, baseLatency: c.baseLatency ?? null, outputLatency: c.outputLatency ?? null }; c.close(); } catch { /* none */ }
+      }
+      const data = buildDiagnostics({
+        userAgent: navigator.userAgent, platform: navigator.platform || '', language: navigator.language || '',
+        audioContext, device: getDevice(), player: stored ? stored.player : null, drift: stored && stored.player ? stored.player.drift : null, song, nowIso: new Date().toISOString(),
+      });
+      const text = JSON.stringify(data, null, 1);
+      diagOut.value = text;
+      diagOut.hidden = false;
+      await deliverFile('guitarapp-diagnostica.json', text);
+      diagMsg.textContent = stored ? 'Informazioni tecniche pronte (file scaricato o condiviso; puoi anche copiare il testo qui sotto).' : 'Informazioni tecniche pronte. Per i dati di riproduzione ascolta prima un brano con audio per almeno 30 secondi.';
+    } catch (err) {
+      diagMsg.textContent = `Non riesco a preparare le informazioni tecniche: ${err.message || err}`;
+    }
+  }
+  device.append(
+    domEl('div', { class: 'row' }, domEl('button', { type: 'button', class: 'btn', id: 'btn-diag', onclick: exportDiagnostics }, 'Informazioni tecniche')),
+    domEl('p', { class: 'muted small' }, 'Un file con i dati tecnici del telefono e della riproduzione (nessun testo del brano), da mandare a chi cura l’app.'),
+    diagMsg,
+    diagOut);
 
   const empty = domEl('section', { class: 'empty' },
     domEl('h2', null, 'Nessun brano ancora'),

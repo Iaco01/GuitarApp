@@ -11,10 +11,12 @@
 import { eventIndexAtTime, beatIndexAtTime } from './timeline.js';
 import { createWakeKeeper } from './player.js';
 import { createMediaClickCore, loopSeekTarget, LOOP_PREROLL_SEC } from './audiosync.js';
+import { createDriftRecorder } from './diagnostics.js';
 import { scanMp3 } from './mp3frames.js';
 import { mp3Layout, mp3Kind, mp3DurationSec, planMp3Slice } from './mp3seek.js';
 
 const AUDIO_TICK_MS = 25;
+const REVOKE_DELAY_MS = 10000;
 
 export function createAudioPlayer({ timeline, blob, latencyMs = 0, onFrame, onState, onNotice, onError } = {}) {
   let tl = timeline;
@@ -40,8 +42,18 @@ export function createAudioPlayer({ timeline, blob, latencyMs = 0, onFrame, onSt
   let originSec = 0;
   let loading = false; // a new source is loading: the element clock is not running yet
   let scanDone = false;
+  let memBlob = blob;
   let exact = null; // { scan, layout, kind } after the scan of an mp3
-  let diag = { seeks: 0, lastSeekMs: 0, maxSeekMs: 0, slices: 0 };
+  const drift = createDriftRecorder();
+  let bestDrift = null;
+  const restartDrift = () => {
+    const cur = drift.summary();
+    if (cur.rows.length >= 2 && (!bestDrift || cur.rows.length >= bestDrift.rows.length)) bestDrift = cur;
+    drift.reset(rate);
+  };
+  let diag = { seeks: 0, lastSeekMs: 0, maxSeekMs: 0, slices: 0, lastGapMs: 0, maxGapMs: 0 };
+  let gapFrom = 0; // when the last jump during play began (ms): the silence of a jump lasts until the element plays again
+  const nowMs = () => (typeof performance !== 'undefined' ? performance.now() : 0);
   const el = new Audio();
   el.preload = 'auto';
   el.src = fullUrl;
@@ -54,7 +66,8 @@ export function createAudioPlayer({ timeline, blob, latencyMs = 0, onFrame, onSt
   }
   applyRate();
 
-  const mediaPos = () => originSec + el.currentTime;
+  // (while a new source loads the element may still report the position of the old one: the origin is the position)
+  const mediaPos = () => originSec + (loading ? 0 : el.currentTime);
   const pos = () => mediaPos() - latency;
 
   const scanReady = (async () => {
@@ -62,6 +75,8 @@ export function createAudioPlayer({ timeline, blob, latencyMs = 0, onFrame, onSt
       const bytes = new Uint8Array(await blob.arrayBuffer());
       const scan = scanMp3(bytes);
       if (scan && !destroyed) {
+        // the slices are cut from a copy in memory: slicing a Blob that lives in IndexedDB crashed the renderer after a few jumps
+        memBlob = new Blob([bytes], { type: blob.type || 'audio/mpeg' });
         const layout = mp3Layout(bytes, scan);
         exact = { scan, layout, kind: mp3Kind(bytes, scan) };
       }
@@ -79,6 +94,7 @@ export function createAudioPlayer({ timeline, blob, latencyMs = 0, onFrame, onSt
   // it carries on from the new place.
   function seekMedia(t) {
     const target = Math.max(0, t);
+    restartDrift();
     const t0 = typeof performance !== 'undefined' ? performance.now() : 0;
     const wasPlaying = state === 'playing';
     if (!exact) {
@@ -87,19 +103,21 @@ export function createAudioPlayer({ timeline, blob, latencyMs = 0, onFrame, onSt
       return;
     }
     const plan = planMp3Slice(exact.scan, exact.layout, target);
-    const next = URL.createObjectURL(blob.slice(plan.byteStart));
+    const next = URL.createObjectURL(memBlob.slice(plan.byteStart));
     const old = sliceUrl;
     sliceUrl = next;
     originSec = plan.originSec;
     loading = true;
     el.src = next;
     applyRate();
-    if (old) URL.revokeObjectURL(old);
+    // (revoked a little later: with the media element still letting go of the old source a renderer crash was seen in Chromium)
+    if (old) setTimeout(() => URL.revokeObjectURL(old), REVOKE_DELAY_MS);
     diag.slices++;
     diag.seeks++;
     diag.lastSeekMs = Math.round((typeof performance !== 'undefined' ? performance.now() : 0) - t0);
     diag.maxSeekMs = Math.max(diag.maxSeekMs, diag.lastSeekMs);
     resetClicks(originSec);
+    gapFrom = wasPlaying ? nowMs() : 0;
     if (wasPlaying) {
       const pr = el.play();
       if (pr && pr.catch) pr.catch(() => {});
@@ -162,6 +180,7 @@ export function createAudioPlayer({ timeline, blob, latencyMs = 0, onFrame, onSt
   }
 
   function tick() {
+    if (state === 'playing' && !loading && typeof performance !== 'undefined') drift.tick(mediaPos(), ctx ? ctx.currentTime : NaN, performance.now() / 1000);
     if (!ctx || state !== 'playing' || !metronome) return;
     const now = ctx.currentTime;
     if (loading) return;
@@ -192,7 +211,7 @@ export function createAudioPlayer({ timeline, blob, latencyMs = 0, onFrame, onSt
   }
 
   function checkLoop() {
-    if (loopSection === null || state !== 'playing') return;
+    if (loopSection === null || state !== 'playing' || loading) return;
     const target = loopSeekTarget(pos(), tl.sections[loopSection]);
     if (target !== null) seekDisplay(Math.max(0, target - LOOP_PREROLL_SEC));
   }
@@ -244,8 +263,14 @@ export function createAudioPlayer({ timeline, blob, latencyMs = 0, onFrame, onSt
   el.addEventListener('seeked', () => {
     if (state === 'playing') resetClicks(mediaPos());
   });
+  el.addEventListener('loadedmetadata', () => { loading = false; });
   el.addEventListener('playing', () => {
     loading = false;
+    if (gapFrom) {
+      diag.lastGapMs = Math.round(nowMs() - gapFrom);
+      diag.maxGapMs = Math.max(diag.maxGapMs, diag.lastGapMs);
+      gapFrom = 0;
+    }
     if (state === 'playing') resetClicks(mediaPos());
   });
   el.addEventListener('ended', () => {
@@ -277,6 +302,7 @@ export function createAudioPlayer({ timeline, blob, latencyMs = 0, onFrame, onSt
       if (state !== 'playing') return;
       el.pause();
       halt();
+      restartDrift();
       setState('paused');
       if (onFrame) onFrame(info());
     },
@@ -326,6 +352,7 @@ export function createAudioPlayer({ timeline, blob, latencyMs = 0, onFrame, onSt
       rate = Math.min(2, Math.max(0.25, Number(r) || 1));
       el.defaultPlaybackRate = rate;
       el.playbackRate = rate;
+      restartDrift();
       if (state === 'playing') resetClicks(mediaPos());
     },
     setLatency(ms) {
@@ -361,7 +388,11 @@ export function createAudioPlayer({ timeline, blob, latencyMs = 0, onFrame, onSt
       seeks: diag.seeks,
       lastSeekMs: diag.lastSeekMs,
       maxSeekMs: diag.maxSeekMs,
+      lastGapMs: diag.lastGapMs,
+      maxGapMs: diag.maxGapMs,
       latencyMs: Math.round(latency * 1000),
+      audioContext: ctx ? { sampleRate: ctx.sampleRate, baseLatency: ctx.baseLatency ?? null, outputLatency: ctx.outputLatency ?? null } : null,
+      drift: (() => { const cur = drift.summary(); return cur.rows.length >= 2 && (!bestDrift || cur.rows.length >= bestDrift.rows.length) ? cur : bestDrift; })(),
     }),
     destroy() {
       destroyed = true;
@@ -370,7 +401,7 @@ export function createAudioPlayer({ timeline, blob, latencyMs = 0, onFrame, onSt
       el.removeAttribute('src');
       try { el.load(); } catch { /* ignore */ }
       URL.revokeObjectURL(fullUrl);
-      if (sliceUrl) URL.revokeObjectURL(sliceUrl);
+      if (sliceUrl) { const u = sliceUrl; setTimeout(() => URL.revokeObjectURL(u), REVOKE_DELAY_MS); }
       if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisibility);
       if (ctx) { try { ctx.close(); } catch { /* ignore */ } }
     },

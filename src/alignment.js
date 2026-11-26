@@ -148,7 +148,15 @@ export function normalizeAlignment(raw) {
     shiftSec: Number.isFinite(raw.shiftSec) ? Math.max(-5, Math.min(5, raw.shiftSec)) : 0,
     accepted: !!raw.accepted,
     createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : '',
+    ...(normalizeDecode(raw.decode) ? { decode: normalizeDecode(raw.decode) } : {}),
   };
+}
+
+// How the audio was decoded for the analysis (diagnostics only): { method: 'pieces' | 'whole', pieceShiftsMs: [] }
+function normalizeDecode(d) {
+  if (!d || typeof d !== 'object' || (d.method !== 'pieces' && d.method !== 'whole')) return null;
+  const shifts = Array.isArray(d.pieceShiftsMs) ? d.pieceShiftsMs.filter((v) => Number.isFinite(v)).slice(0, 200) : [];
+  return { method: d.method, pieceShiftsMs: shifts };
 }
 
 // Does the alignment still describe this sheet? (same number of events, same chord names)
