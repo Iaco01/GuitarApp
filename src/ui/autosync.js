@@ -8,15 +8,8 @@ import { openCorrection } from './correct.js';
 import { eventRefs, sectionState, sectionEventIndices, alignmentFits, alignmentRecognised, countVerified, shiftAlignment, applyMeasuredTiming, exportTruth, capAtYellow } from '../alignment.js';
 import { formatClock } from '../audiosync.js';
 import { formatBpm } from '../render.js';
+import { AS_STATE_TEXT, AS_FREE_TEXT, AS_GAP_NOTE, AS_MANY_MISSING, sectionWhy, gapLabel } from '../syncwords.js';
 
-// short words: the state and the BPM must fit in one row at 320 px (a longer text was cut, and the BPM with it)
-const AS_STATE_TEXT = {
-  green: 'sicura',
-  yellow: 'controlla',
-  red: 'incerta',
-  verified: 'verificata ✓',
-  skipped: 'non presente nell’audio',
-};
 const AS_SHIFT_MS = [-100, -50, 50, 100];
 const AS_LEAD_SEC = 2;
 const AS_GAP_MIN_SEC = 3;
@@ -158,7 +151,7 @@ export function createAutoSyncPanel({ song, getBlob, getPlayer, timelineWith, pe
     song.sections.forEach((_, si) => {
       if (!idx[si].length) return;
       for (const g of gapsBefore.get(si) || []) {
-        rows.append(domEl('li', { class: 'as-gap', 'data-gap': g.before }, `${formatClock(g.startSec).replace(/,\d$/, '')}–${formatClock(g.endSec).replace(/,\d$/, '')}: parte non presente nel foglio`));
+        rows.append(domEl('li', { class: 'as-gap', 'data-gap': g.before }, domEl('span', { class: 'as-gap-text' }, gapLabel(g.startSec, g.endSec)), domEl('span', { class: 'as-gap-note' }, AS_GAP_NOTE)));
       }
       const st = sectionState(a, si);
       counts[st]++;
@@ -171,11 +164,16 @@ export function createAutoSyncPanel({ song, getBlob, getPlayer, timelineWith, pe
       const s = a.sections[si];
       const cut = idx[si].filter((j) => skippedEv.has(j)).length;
       const tsec = tl.sections[si];
+      const why = sectionWhy(s, st);
       rows.append(domEl('li', { class: 'as-row', 'data-sec': si, 'data-state': st },
         domEl('span', { class: 'as-dot', 'aria-hidden': 'true' }),
         domEl('div', { class: 'as-info' },
           domEl('div', { class: 'as-top' }, domEl('span', { class: 'as-name' }, secName(si)), domEl('span', { class: 'as-time' }, formatClock(tsec ? tsec.startSec : 0))),
-          domEl('div', { class: 'as-sub' }, `${AS_STATE_TEXT[st]} · ${s.bpm === null ? 'libero' : formatBpm(s.bpm) + ' BPM'}${cut ? ` · −${cut} accordi` : ''}`)),
+          domEl('div', { class: 'as-sub' },
+            domEl('span', { class: 'as-state' }, AS_STATE_TEXT[st]),
+            domEl('span', { class: 'as-tempo' }, s.bpm === null ? AS_FREE_TEXT : formatBpm(s.bpm) + ' BPM'),
+            cut ? domEl('span', { class: 'as-cut' }, `−${cut} accordi`) : null),
+          why ? domEl('div', { class: 'as-why' }, why) : null),
         domEl('button', { type: 'button', class: 'btn icon as-act', 'data-act': 'listen', 'aria-label': `Ascolta ${secName(si)}`, title: 'Ascolta', onclick: () => listenFrom((tsec ? tsec.startSec : 0) - 1) }, '▶'),
         domEl('button', {
           type: 'button', class: 'btn icon as-act' + (st === 'yellow' || st === 'red' ? ' primary' : ''), 'data-act': 'correct', 'aria-label': `Correggi a orecchio ${secName(si)}`, title: 'Correggi a orecchio',
@@ -196,7 +194,7 @@ export function createAutoSyncPanel({ song, getBlob, getPlayer, timelineWith, pe
       persist,
       onSaved: (info) => {
         rebuild();
-        setMsg(info && info.missing.length ? `«${secName(si)}»: salvati i tempi toccati; senza tempo (restano quelli automatici): ${info.missing.join(', ')}.` : `«${secName(si)}» verificata a orecchio.`);
+        setMsg(info && info.missing.length ? `«${secName(si)}»: salvati i tempi toccati; senza tempo (restano quelli automatici): ${info.missing.length <= AS_MANY_MISSING ? info.missing.join(', ') : `${info.missing.length} accordi`}.` : `«${secName(si)}» verificata a orecchio.`);
         refresh();
         if (onChange) onChange();
       },
@@ -258,7 +256,7 @@ export function createAutoSyncPanel({ song, getBlob, getPlayer, timelineWith, pe
     el.append(
       domEl('p', { class: 'as-counts', id: 'as-counts' },
         `${c.green} sicure · ${c.yellow} da controllare · ${c.red} incerte · ${c.verified} verificate a orecchio${c.skipped ? ` · ${c.skipped} non presenti nell’audio` : ''}`),
-      domEl('p', { class: 'muted small' }, 'Verde: sicura. Giallo: da controllare. Rosso: incerta. Verde scuro: verificata a orecchio. Il colore indica quanto l’app si fida, non quanto è giusta.'));
+      domEl('p', { class: 'muted small' }, 'Verde: sicura. Giallo: da controllare. Rosso: incerta. Verde scuro: verificata a orecchio. Tempo libero: il brano non ha un battito fisso e i cambi sono stimati. Il colore indica quanto l’app si fida, non quanto è giusta.'));
     if (stats) el.append(domEl('p', { class: 'muted small', id: 'as-stats' }, `Calcolo: decodifica ${(stats.decodeMs / 1000).toFixed(1)} s, analisi ${(stats.analyseMs / 1000).toFixed(1)} s.`));
     if (a.transposeFound !== 0) {
       const applied = (song.transpose || 0) === a.transposeFound;

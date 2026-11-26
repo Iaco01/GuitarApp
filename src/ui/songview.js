@@ -350,6 +350,11 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
 
   function startLoop(si) {
     if (editMode) return;
+    // a section that the audio does not have: there is nothing to repeat
+    if (timeline.sections[si] && timeline.sections[si].skipped) {
+      showNote('Questa sezione non è nell’audio');
+      return;
+    }
     const st = player.getState();
     player.setLoop(si);
     if (st === 'stopped' || st === 'paused') player.playFromTime(timeline.sections[si].startSec);
@@ -586,7 +591,9 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
     }
     if (nextEl) nextEl.classList.add('next');
     lastProgress = -1;
-    const anchorEl = curEl || (counting ? nextEl : null);
+    // in a gap (music that is not in the sheet) nothing is current: the sheet goes to the section that picks up again
+    const inGap = !counting && nextOverride >= 0 && i < 0;
+    const anchorEl = curEl || (counting || inGap ? nextEl : null);
     const line = anchorEl ? anchorEl.closest('.line') : null;
     const sec = anchorEl ? anchorEl.closest('.sec') : null;
     if (sec !== curSec) {
@@ -602,7 +609,9 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
     }
     if (line && line !== curLine) {
       curLine = line;
-      autoScroll(line);
+      // (in a gap: the beginning of the section that resumes, with its heading, if its first chord is the next one)
+      const first = inGap && sec && line === sec.querySelector('.line');
+      autoScroll(first ? sec : line);
     }
   }
 

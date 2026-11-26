@@ -39,8 +39,11 @@ const OFF_GRID_MAX = 0.5;
 // the section that is far shorter than its sisters is tried again with a cheaper skip (per event)
 const SKIP_SUSPECT = 2;
 // the audio may be shorter than the sheet: fractions of the sheet that the audio is supposed to cover, tried when the
-// result with the whole sheet looks poor (see alignEventsSteps: s0Frac)
+// result with the whole sheet looks poor (see alignEventsSteps: s0Frac) and covering the whole sheet would need a tempo
+// above COVER_MIN_BPM (the beats of the sheet divided by the length of the audio): a recording of the whole song, even a
+// noisy one, does not need these extra runs
 const COVER_TRIES = [0.7, 0.45, 0.28];
+const COVER_MIN_BPM = 190;
 // share of the sections (not skipped) that must not be red for the result to be called decent
 const DECENT_SHARE = 0.6;
 const EVID_LO = 0.08;
@@ -190,7 +193,10 @@ export function* analyseAndAlignSteps({ samples, sampleRate, song, onProgress = 
     dbg.push(`first: fit ${fit(d1).toFixed(1)}, ${decent(d1) ? 'decent' : 'poor'}`);
     // (1) a result that is poor as a whole: the audio may cover only the first part of the sheet. The frames per beat that
     // the first pass starts from assume that the audio covers the whole sheet; try shorter parts
-    if (!decent(best)) {
+    const sumPrior = events.reduce((a, e) => a + e.priorBeats, 0);
+    const audioSec = feat.frames / feat.fps;
+    const impliedBpm = (f) => (60 * sumPrior * f) / audioSec;
+    if (!decent(best) && impliedBpm(1) > COVER_MIN_BPM) {
       const share = (d) => {
         let all = 0;
         let here = 0;
@@ -205,7 +211,7 @@ export function* analyseAndAlignSteps({ samples, sampleRate, song, onProgress = 
         const d = yield* describe(a);
         return d ? { al: a, ...d } : null;
       };
-      for (const f of COVER_TRIES) {
+      for (const f of COVER_TRIES.filter((x) => impliedBpm(x) <= COVER_MIN_BPM)) {
         let c = yield* tryCover(f);
         if (!c) continue;
         // (only a result that leaves the end of the sheet out is a cut recording: otherwise it is a different explanation of
@@ -378,20 +384,21 @@ export function* analyseAndAlignSteps({ samples, sampleRate, song, onProgress = 
       return { all, here, spanSec: here.length ? startSec[here[here.length - 1]] - startSec[here[0]] : 0, bpm: sections[si] ? sections[si].bpm : null, complete: here.length > 0 && here.length === all.length };
     });
     const sisters = sisterFlags(sisterGroups(events), secInfo);
-    const capSection = (si, cap) => {
+    const capSection = (si, cap, why) => {
       const s = sections[si];
       if (!s || s.skipped || !(s.confidence > cap)) return;
       s.confidence = cap;
       secInfo[si].here.forEach((j) => { confidence[j] = Math.min(confidence[j], cap); });
       s.capped = true;
+      s.why = why;
     };
     sisters.forEach((f, si) => {
       if (!f) return;
-      capSection(si, f.severe ? COH_CAP_RED : COH_CAP_YELLOW);
+      capSection(si, f.severe ? COH_CAP_RED : COH_CAP_YELLOW, 'sisters');
       // the boundary with a wrong section is not reliable on either side
-      if (f.severe) for (const nb of [si - 1, si + 1]) if (nb >= 0 && nb < sections.length) capSection(nb, COH_CAP_YELLOW);
+      if (f.severe) for (const nb of [si - 1, si + 1]) if (nb >= 0 && nb < sections.length) capSection(nb, COH_CAP_YELLOW, 'sisters');
     });
-    sections.forEach((s, si) => { if (s && s.beatGrid && s.offGrid > OFF_GRID_MAX) capSection(si, COH_CAP_YELLOW); });
+    sections.forEach((s, si) => { if (s && s.beatGrid && s.offGrid > OFF_GRID_MAX) capSection(si, COH_CAP_YELLOW, 'offgrid'); });
     // an event that precedes music not in the sheet ends where that music starts
     present.forEach((j, k) => {
       if (k + 1 >= present.length) return;

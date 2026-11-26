@@ -250,7 +250,8 @@ export function createPlayPanel(song, { onLoopExit = null, onPlayPause, onStop, 
       dots.forEach((dot, i) => dot.classList.toggle('on', d.beatInBar === i));
       // effective tempo (scaled between anchors); "≈" when it differs from the saved one
       const approx = Number.isFinite(d.savedBpm) && Math.abs(d.bpm - d.savedBpm) > 0.2;
-      const bpmText = approx ? `≈${formatBpm(Math.round(d.bpm * 10) / 10)}` : `=${formatBpm(d.bpm)}`;
+      // (in a gap the tempo of the sheet means nothing: no number, so that «≈153,7» does not show up for music that is not in it)
+      const bpmText = d.gap ? '–' : approx ? `≈${formatBpm(Math.round(d.bpm * 10) / 10)}` : `=${formatBpm(d.bpm)}`;
       if (bpmEl.dataset.t !== bpmText) {
         bpmEl.dataset.t = bpmText;
         // the note glyph has a wide side bearing in most fonts: it sits in its own tight span

@@ -414,14 +414,19 @@ h1, h2, h3, p, ul, ol, dl, dd { margin: 0; }
 .as-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .as-time { flex: none; white-space: nowrap; }
 .as-time { font: 700 15px var(--mono); }
-.as-sub { font: 600 13px var(--ui); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.as-sub { font: 600 13px var(--ui); color: var(--muted); display: flex; flex-wrap: wrap; gap: 0 8px; }
+/* each word group stays whole: when the row is narrow it goes to a second line, it is never cut */
+.as-sub > span { white-space: nowrap; }
+.as-state { font-weight: 700; }
+.as-why { font: 600 12px var(--ui); color: var(--muted); font-style: italic; }
 @media (max-width: 340px) {
   .as-row { padding: 4px 6px; gap: 0 6px; }
   .as-sub { font-size: 12px; }
 }
 .as-shift .btn { min-width: 0; padding: 0 6px; white-space: nowrap; }
 .as-act { min-width: 44px; width: 44px; min-height: 44px; font-size: 18px; }
-.as-gap { font: italic 600 13px var(--ui); color: var(--muted); padding: 0 4px; }
+.as-gap { font: italic 600 13px var(--ui); color: var(--muted); padding: 0 4px; display: flex; flex-wrap: wrap; gap: 0 8px; }
+.as-gap-note { font-style: normal; }
 .as-now { font: 700 16px var(--mono); min-height: 22px; }
 .as-actions { align-items: center; }
 .as-actions .btn { min-height: 48px; }
@@ -447,5 +452,12 @@ h1, h2, h3, p, ul, ol, dl, dd { margin: 0; }
 .corr-react .btn { min-width: 44px; min-height: 44px; }
 .corr-react-val { font: 700 16px var(--mono); min-width: 64px; text-align: center; }
 .corr-final .btn { flex: 1; min-height: 52px; }
+.corr { padding-bottom: calc(var(--corr-bar-h, 90px) + 16px + env(safe-area-inset-bottom)); }
+.corr-foot { position: fixed; left: 0; right: 0; bottom: 0; z-index: 41; display: grid; gap: 4px; padding: 6px 12px calc(8px + env(safe-area-inset-bottom)); background: var(--card); border-top: 1px solid var(--line); box-shadow: 0 -4px 16px rgba(0, 0, 0, .25); }
+.corr-stop { margin: 0; font: 600 13px var(--ui); color: var(--muted); }
+.corr-foot .row { display: flex; gap: 8px; }
+.corr-chip { cursor: pointer; min-height: 32px; display: inline-flex; align-items: center; }
+.corr-chip.before { opacity: .45; }
+.corr-chip.start { border-style: solid; border-color: var(--accent); }
 .sync-head .btn { flex: none; white-space: nowrap; }
 .sync-head .rec-title { min-width: 0; }

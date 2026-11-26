@@ -84,6 +84,9 @@ export function makeAlignment(result, song, createdAt = new Date().toISOString()
         confidence: r2(Number.isFinite(s.confidence) ? s.confidence : 0),
         verified: false,
         skipped: !!s.skipped,
+        // why a section cannot be trusted besides its own tempo: 'sisters' (it lasts differently from the sections with the same
+        // chords), 'offgrid' (its changes miss the beats); null otherwise
+        why: s.why === 'sisters' || s.why === 'offgrid' ? s.why : null,
       };
     }),
     match: matchRatio(result) === null ? null : r3(matchRatio(result)),
@@ -123,6 +126,7 @@ export function normalizeAlignment(raw) {
       confidence: s && Number.isFinite(s.confidence) ? Math.min(1, Math.max(0, s.confidence)) : 0,
       verified: !!(s && s.verified),
       skipped: !!(s && s.skipped),
+      why: s && (s.why === 'sisters' || s.why === 'offgrid') ? s.why : null,
     })),
     match: Number.isFinite(raw.match) ? raw.match : null,
     shiftUntrusted: !!raw.shiftUntrusted,
@@ -253,40 +257,47 @@ export function effectiveEventTimes(song, alignment, anchors = null) {
 // section and before the start of the next. Mutates `alignment` only when ok; the section becomes verified.
 // With `partial` fewer entries are accepted (the person stopped before the end): they go to the first events of the
 // section, the others keep their automatic time (which must come after the last of them), and the section is not
-// marked verified. Returns { ok, reason? } or, when ok, { ok, missing } with the section positions left untimed.
-export function replaceSectionStarts(alignment, song, si, startsSec, { partial = false } = {}) {
+// marked verified. With `from` the taps start at that event of the section (the person began from a chord in the
+// middle): they go to the events from..from+m-1, and the ones before and after keep their automatic times.
+// Returns { ok, reason? } or, when ok, { ok, missing } with the section positions left untimed.
+export function replaceSectionStarts(alignment, song, si, startsSec, { partial = false, from = 0 } = {}) {
   const idx = sectionEventIndices(song)[si];
   if (!idx || !idx.length) return { ok: false, reason: 'La sezione non ha accordi' };
   const m = startsSec.length;
-  if (m === 0 || m > idx.length || (m < idx.length && !partial)) return { ok: false, reason: `Servono ${idx.length} tocchi, ne hai fatti ${m}` };
+  const first0 = Math.max(0, Math.min(idx.length - 1, Math.floor(from) || 0));
+  const room = idx.length - first0;
+  if (m === 0 || m > room || (m < idx.length && !partial)) return { ok: false, reason: `Servono ${idx.length} tocchi, ne hai fatti ${m}` };
   for (let k = 0; k < m; k++) {
     if (!Number.isFinite(startsSec[k]) || startsSec[k] < 0 || (k > 0 && startsSec[k] <= startsSec[k - 1])) return { ok: false, reason: 'I tocchi non sono in ordine' };
   }
   const shift = alignment.shiftSec || 0;
   const first = idx[0];
-  const last = idx[idx.length - 1];
-  const prevEnd = first > 0 ? alignment.eventStartSec[first - 1] + shift : -Infinity;
-  const nextStart = last + 1 < alignment.eventStartSec.length ? alignment.eventStartSec[last + 1] + shift : Infinity;
-  if (startsSec[0] <= prevEnd + MIN_GAP_SEC) return { ok: false, reason: 'Il primo tocco cade prima della fine della sezione precedente' };
-  const limit = m < idx.length ? alignment.eventStartSec[idx[m]] + shift : nextStart;
+  const prevEnd = first0 > 0 ? alignment.eventStartSec[idx[first0 - 1]] + shift : first > 0 ? alignment.eventStartSec[first - 1] + shift : -Infinity;
+  const nextStart = idx[idx.length - 1] + 1 < alignment.eventStartSec.length ? alignment.eventStartSec[idx[idx.length - 1] + 1] + shift : Infinity;
+  if (startsSec[0] <= prevEnd + MIN_GAP_SEC) return { ok: false, reason: first0 > 0 ? 'Il primo tocco cade prima dell’accordo che lo precede: hai toccato troppo presto?' : 'Il primo tocco cade prima della fine della sezione precedente' };
+  const lastK = first0 + m - 1;
+  const limit = lastK < idx.length - 1 ? alignment.eventStartSec[idx[lastK + 1]] + shift : nextStart;
   if (startsSec[m - 1] >= limit - MIN_GAP_SEC) {
-    return { ok: false, reason: m < idx.length ? 'Gli ultimi tocchi cadono dopo l’inizio automatico degli accordi che mancano: hai saltato un tocco?' : 'L’ultimo tocco cade dopo l’inizio della sezione successiva' };
+    return { ok: false, reason: lastK < idx.length - 1 ? 'Gli ultimi tocchi cadono dopo l’inizio automatico degli accordi che mancano: hai saltato un tocco?' : 'L’ultimo tocco cade dopo l’inizio della sezione successiva' };
   }
   for (let k = 0; k < m; k++) {
-    const j = idx[k];
+    const j = idx[first0 + k];
     alignment.eventStartSec[j] = r3(startsSec[k] - shift);
     alignment.confidence[j] = 1;
     alignment.eventBeats[j] = null;
   }
   const s = alignment.sections[si];
-  s.startSec = r3(startsSec[0] - shift);
-  if (m === idx.length) {
+  if (first0 === 0) s.startSec = r3(startsSec[0] - shift);
+  const complete = first0 === 0 && m === idx.length;
+  if (complete) {
     s.confidence = 1;
     s.verified = true;
-    // a gap that sat before an event that was moved is no longer reliable: drop the ones that no longer fit
-    if (alignment.gaps) alignment.gaps = alignment.gaps.filter((g) => g.startSec >= alignment.eventStartSec[g.before - 1] && g.endSec <= alignment.eventStartSec[g.before] + 1e-6);
   }
-  return { ok: true, missing: idx.slice(m).map((_, k) => m + k) };
+  // a gap that sat before an event that was moved is no longer reliable: drop the ones that no longer fit
+  if (alignment.gaps) alignment.gaps = alignment.gaps.filter((g) => g.startSec >= alignment.eventStartSec[g.before - 1] && g.endSec <= alignment.eventStartSec[g.before] + 1e-6);
+  const missing = [];
+  for (let k = 0; k < idx.length; k++) if (k < first0 || k > lastK) missing.push(k);
+  return { ok: true, missing };
 }
 
 // Copy of the alignment with the starts of a section replaced (preview before saving). Same result shape.
