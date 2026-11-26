@@ -4,6 +4,7 @@
 import { resampleMono, computeFeaturesSteps, FEATURE_RATE } from './features.js';
 import { runSteps } from './steps.js';
 import { tempoCurvesSteps, curveOfRange, pickTempo, trackBeats, summariseBeats } from './beats.js';
+import { fixSameChordBoundaries } from './samechord.js';
 import { alignEventsSteps, snapToOnsets, snapToBeats, gridBonusFrames, chordTemplate, shiftedTemplate } from './align.js';
 import { freeBoundary, FREE_CONF_MAX } from './refine.js';
 import { estimateSongDurations } from '../durations.js';
@@ -321,6 +322,8 @@ export function* analyseAndAlignSteps({ samples, sampleRate, song, onProgress = 
     const endSec = new Array(N).fill(0);
     const snapped = snapToOnsets(present.map((j) => a0.startSec[j]), feat.onset, feat.onsetFps, { lead: ONSET_LEAD });
     present.forEach((j, k) => { startSec[j] = snapped[k]; });
+    // two identical chords in a row: the boundary is the re-attack, not a point of the decay of the first (samechord.js)
+    if (opts.sameChord !== false) fixSameChordBoundaries(feat, events, present, startSec, Math.min(feat.musicEndSec, feat.duration));
     // events that are not in the audio have no time: they sit, with no duration, where the next event starts
     // (or at the end of the last one); the stretch of audio they would fill is a gap before them
     const placeSkipped = () => {
