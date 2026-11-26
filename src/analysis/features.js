@@ -8,6 +8,7 @@ export const FEATURE_RATE = 11025;
 const CHROMA_WIN = 4096;
 const ONSET_WIN = 1024;
 const ONSET_HOP = 256;
+const MUSIC_END_REL = 0.02;
 
 // Mono resampling by box integration (area average). Returns the input itself if already at `target`.
 export function resampleMono(samples, sampleRate, target = FEATURE_RATE) {
@@ -208,6 +209,10 @@ export function* computeFeaturesSteps(x, { chromaHop = 1024, onProgress = null, 
   }
   const sorted = Array.from(energies).sort((p, q) => p - q);
   const ref = Math.max(1e-6, sorted[Math.floor(0.95 * (sorted.length - 1))]);
+  // where the music ends: the last frame with at least MUSIC_END_REL of the usual energy (a fade-out or silence after it)
+  let lastLoud = frames - 1;
+  while (lastLoud > 0 && energies[lastLoud] < MUSIC_END_REL * ref) lastLoud--;
+  const musicEndSec = Math.min(x.length / sr, ((lastLoud + 1) * chromaHop) / sr);
   for (let i = 0; i < chroma.length; i++) chroma[i] = Math.log(1 + (30 * chroma[i]) / ref);
   const bsorted = [];
   for (let t = 0; t < frames; t++) {
@@ -237,7 +242,7 @@ export function* computeFeaturesSteps(x, { chromaHop = 1024, onProgress = null, 
   }, kMax + 1);
   const onset = detrendOnset(flux, Math.round((0.5 * sr) / ONSET_HOP));
   progress(1);
-  return { fps: sr / chromaHop, frames, chroma, bass, onset, onsetFps: sr / ONSET_HOP, tuningCents, duration: x.length / sr };
+  return { fps: sr / chromaHop, frames, chroma, bass, onset, onsetFps: sr / ONSET_HOP, tuningCents, duration: x.length / sr, musicEndSec, energy: energies };
 }
 
 // Subtracts a centred moving average (half-width `half`) and clips at zero; the result is

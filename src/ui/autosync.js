@@ -8,6 +8,7 @@ import { openCorrection } from './correct.js';
 import { openNudgeSheet } from './nudgesheet.js';
 import { eventRefs, sectionState, sectionEventIndices, alignmentFits, alignmentRecognised, countVerified, shiftAlignment, applyMeasuredTiming, exportTruth, capAtYellow } from '../alignment.js';
 import { formatClock } from '../audiosync.js';
+import { alignedEventBeats } from '../timeline.js';
 import { formatBpm } from '../render.js';
 import { AS_STATE_TEXT, AS_FREE_TEXT, AS_GAP_NOTE, AS_MANY_MISSING, sectionWhy, gapLabel } from '../syncwords.js';
 
@@ -289,7 +290,7 @@ export function createAutoSyncPanel({ song, getBlob, getPlayer, timelineWith, pe
       domEl('div', { class: 'row' },
         domEl('button', { type: 'button', class: 'btn', id: 'as-measured', onclick: () => {
           if (!window.confirm('Portare nel brano i BPM e le durate misurati dall’audio? Servono per studiare con il metronomo con i tempi veri (anche senza audio). Le durate di ogni accordo e il BPM delle sezioni con tempo stabile cambiano.')) return;
-          const r = applyMeasuredTiming(song, a);
+          const r = applyMeasuredTiming(song, a, alignedEventBeats(song, a));
           persist();
           rebuild();
           setMsg(`Portati nel brano ${r.sections} tempi e ${r.events} durate.`);

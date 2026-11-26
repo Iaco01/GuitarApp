@@ -9,9 +9,15 @@ import { freeBoundary, FREE_CONF_MAX } from './refine.js';
 import { estimateSongDurations } from '../durations.js';
 import { effectiveSectionBpms } from '../model.js';
 import { GAP_MIN_SEC, sectionState } from '../alignment.js';
+import { smoothBeatGrid, gridTimes } from '../beatgrid.js';
 import { sisterGroups, sisterFlags, offGridShare } from './coherence.js';
 
 const ONSET_LEAD = 0;
+// The onsets and chord starts the engine finds sit this much after the real attack (median 16-42 ms on the synthetic benches
+// with and without drums, whatever the tempo): every time is moved back by it, so that the clicks fall on the attacks
+const ENGINE_LAG_SEC = 0.025;
+// the last chord is held until its sound has dropped to this share of its level at the attack (or the audio ends): the clicks stop there
+const MUSIC_END_SHARE = 0.3;
 const BPM_CONF_MIN = 0.35;
 const BPM_REGULARITY_MIN = 0.8;
 // Confidence of a change from the sharpness of its boundary (how much worse the path gets when it is moved,
@@ -82,6 +88,19 @@ function tempoConsistency(idx, events, startSec, endSec, ref, measured) {
   const n = measured.filter(Boolean).length;
   const bad = dev.filter((d) => d > Math.log(1 + TEMPO_TOL)).length;
   return { factor, badShare: n ? bad / n : 0 };
+}
+
+// Where the sound of the last chord (struck at `t`) has dropped below MUSIC_END_SHARE of its level at the attack, but never after
+// the music (see features.js) ends and not before a beat has passed.
+function lastChordEnd(feat, t) {
+  const fps = feat.fps;
+  const i0 = Math.max(0, Math.min(feat.frames - 1, Math.floor(t * fps)));
+  const att = [];
+  for (let i = i0; i <= Math.min(feat.frames - 1, i0 + Math.ceil(0.6 * fps)); i++) att.push(feat.energy[i]);
+  const level = median(att);
+  let end = i0;
+  for (let i = i0; i < feat.frames; i++) if (feat.energy[i] >= MUSIC_END_SHARE * level) end = i;
+  return Math.min(feat.musicEndSec, Math.max(feat.musicEndSec * 0, ((end + 1) / fps)));
 }
 
 function median(a) {
@@ -311,6 +330,7 @@ export function* analyseAndAlignSteps({ samples, sampleRate, song, onProgress = 
       let bpm = null;
       let beatGrid = false;
       let beatTimes = null;
+      let grid = null;
       let bpmConf = pick.conf;
       let reg = 0;
       if (secEnd - secStart >= 6) {
@@ -322,6 +342,7 @@ export function* analyseAndAlignSteps({ samples, sampleRate, song, onProgress = 
           bpm = Math.round(sm.bpm * 10) / 10;
           beatGrid = true;
           beatTimes = tb.times;
+          grid = smoothBeatGrid(tb.times, bpm, secStart, secEnd);
           grids.push({ times: tb.times, bpm: sm.bpm, from: secStart, to: secEnd });
         }
         bpmConf = Math.min(1, pick.conf) * (0.5 + 0.5 * reg);
@@ -361,10 +382,11 @@ export function* analyseAndAlignSteps({ samples, sampleRate, song, onProgress = 
       const cons = beatGrid ? tempoConsistency(idx, events, startSec, endSec, bpm, measured) : null;
       if (cons) consList.push({ si: sections.length, idx, cons });
       const conf = median(idx.map((j) => confidence[j]));
-      sections.push({ startSec: secStart, endSec: secEnd, bpm, confidence: conf, badTempoShare: cons ? cons.badShare : 0, bpmConfidence: bpmConf, beatGrid, tempoCandidate: pick.bpm, regularity: reg, beatTimes });
+      sections.push({ startSec: secStart, endSec: secEnd, bpm, confidence: conf, badTempoShare: cons ? cons.badShare : 0, bpmConfidence: bpmConf, beatGrid, tempoCandidate: pick.bpm, regularity: reg, beatTimes, grid });
       if (beatGrid) {
         sections[sections.length - 1].offGrid = offGridShare(idx.map((j) => startSec[j]), beatTimes, bpm);
-        const snapped = snapToBeats(idx.map((j) => startSec[j]), beatTimes, bpm, opts.snapTol ?? 0.2, !!opts.snapHalf);
+        // the changes are drawn to the beats of the smooth grid (the same ones the metronome clicks on), not to the raw tracked ones
+        const snapped = snapToBeats(idx.map((j) => startSec[j]), grid ? gridTimes(grid) : beatTimes, bpm, opts.snapTol ?? 0.2, !!opts.snapHalf);
         idx.forEach((j, k) => { startSec[j] = snapped[k]; });
         pendingBeats.push({ idx, bpm });
       }
@@ -416,6 +438,21 @@ export function* analyseAndAlignSteps({ samples, sampleRate, song, onProgress = 
   }
   al = finalAl;
   if (onProgress) onProgress(1);
+  const lastPresent = (() => { for (let j = skipped.length - 1; j >= 0; j--) if (!skipped[j]) return j; return -1; })();
+  const musicEndSec = lastPresent >= 0 ? lastChordEnd(feat, startSec[lastPresent]) : feat.musicEndSec;
+  const lag = opts.lag ?? ENGINE_LAG_SEC;
+  if (lag) {
+    for (let j = 0; j < startSec.length; j++) {
+      startSec[j] = Math.max(0, startSec[j] - lag);
+      endSec[j] = Math.max(startSec[j], endSec[j] - lag);
+    }
+    for (const g of gaps) { g.startSec -= lag; g.endSec -= lag; }
+    for (const sc of sections) {
+      if (Number.isFinite(sc.startSec)) sc.startSec -= lag;
+      if (Number.isFinite(sc.endSec)) sc.endSec -= lag;
+      if (sc.grid) sc.grid = { ...sc.grid, t0: Math.round((sc.grid.t0 - lag) * 1000) / 1000 };
+    }
+  }
   return {
     eventStartSec: startSec,
     eventEndSec: endSec,
@@ -423,6 +460,7 @@ export function* analyseAndAlignSteps({ samples, sampleRate, song, onProgress = 
     sharpness: Array.from(al.sharpness),
     sections,
     eventBeats,
+    musicEndSec,
     gaps,
     skipped,
     searchLog,

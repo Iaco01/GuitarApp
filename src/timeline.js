@@ -3,6 +3,7 @@
 
 import { effectiveSectionBpms } from './model.js';
 import { alignmentFits, effectiveEventTimes } from './alignment.js';
+import { gridTimes, regularGridTimes, gridTicks, freeTicks, barPosition } from './beatgrid.js';
 
 // Keeps the anchors (section index -> seconds into the audio) that are usable: finite, for an
 // existing section and strictly increasing with the section index. Others are dropped with a
@@ -113,16 +114,23 @@ export function buildTimeline(song, { speed = 1, anchors = null, alignment = nul
 
 function buildAlignedTimeline(song, alignment, anchors, bpms, perBar) {
   const { starts, ends, endSec, gaps, warnings } = effectiveEventTimes(song, alignment, anchors);
-  const N = starts.length;
-  const events = [];
-  const beats = [];
-  const sections = [];
+  const shift = alignment.shiftSec || 0;
   const skippedSet = new Set(alignment.skipped || []);
-  let beatCursor = 0;
-  let k = 0;
-  let prevEnd = 0;
+  // the clicks stop where the music ends (the last chord of a sheet is often held over a silent tail)
+  const musicEnd = Number.isFinite(alignment.musicEndSec) ? alignment.musicEndSec + shift : Infinity;
+  const refs = [];
+  song.sections.forEach((sec, si) => sec.lines.forEach((line, li) => line.chords.forEach((c, ci) => refs.push({ si, li, ci, c }))));
+  const presentIdx = starts.map((_, j) => j).filter((j) => !skippedSet.has(j));
+  const lastPresent = presentIdx.length ? presentIdx[presentIdx.length - 1] : -1;
+  const endOf = (j) => (j === lastPresent ? Math.max(starts[j] + 1e-3, Math.min(ends[j], musicEnd)) : ends[j]);
+  // does music that is not in the sheet (or the end) follow chord j?
+  const stopsAfter = (j) => {
+    if (j === lastPresent) return true;
+    const nx = presentIdx.find((i) => i > j);
+    return nx === undefined || starts[nx] - endOf(j) > 1e-3;
+  };
   // tempo that counts the quarters of a section: the measured one; a free-tempo section (none) takes the one of the nearest
-  // section that has it, else the saved one. The number of beats of an event is what the audio says, not the sheet's
+  // section that has it, else the saved one
   const measured = song.sections.map((_, si) => (alignment.sections[si] && Number.isFinite(alignment.sections[si].bpm) ? alignment.sections[si].bpm : null));
   const refBpm = (si) => {
     if (measured[si] !== null) return measured[si];
@@ -132,20 +140,76 @@ function buildAlignedTimeline(song, alignment, anchors, bpms, perBar) {
     }
     return bpms[si];
   };
+  // 1. the ticks of every chord from the grid of its section (stable tempo) or from its own start (free tempo)
+  const ticksOf = new Array(refs.length).fill(null);
+  const perOf = new Array(refs.length).fill(0);
+  let j0 = 0;
+  song.sections.forEach((sec, si) => {
+    const list = [];
+    while (j0 < refs.length && refs[j0].si === si) { if (!skippedSet.has(j0)) list.push(j0); j0++; }
+    if (!list.length) return;
+    const evs = list.map((j) => ({ start: starts[j], end: endOf(j), stop: stopsAfter(j) }));
+    if (measured[si] !== null) {
+      const stored = alignment.sections[si].grid;
+      const secFrom = evs[0].start;
+      const secTo = evs[evs.length - 1].end;
+      let times;
+      let per;
+      if (stored) {
+        times = gridTimes(stored).map((t) => t + shift);
+        per = stored.per;
+        // anchors stretch the section: the grid follows
+        const o0 = alignment.eventStartSec[list[0]] + shift;
+        const o1 = alignment.eventStartSec[list[list.length - 1]] + shift;
+        const n0 = starts[list[0]];
+        const n1 = starts[list[list.length - 1]];
+        if (o1 - o0 > 1e-6 && (Math.abs(n0 - o0) > 1e-9 || Math.abs(n1 - n0 - (o1 - o0)) > 1e-9)) {
+          const f = (n1 - n0) / (o1 - o0);
+          times = times.map((t) => n0 + (t - o0) * f);
+          per *= f;
+        }
+      } else {
+        per = 60 / measured[si];
+        times = regularGridTimes(list.map((j) => starts[j]), list.map((j) => alignment.confidence[j] || 0.5), measured[si], secFrom, secTo);
+      }
+      const { ticks, phase } = gridTicks(times, per, evs, perBar);
+      list.forEach((j, i) => {
+        perOf[j] = per;
+        ticksOf[j] = ticks[i].map((t, q) => ({ timeSec: t.timeSec, bar: barPosition(t.k, phase, perBar), first: q === 0, accent: barPosition(t.k, phase, perBar) === 0 }));
+      });
+    } else {
+      const per = 60 / refBpm(si);
+      const ticks = freeTicks(evs, per, perBar);
+      list.forEach((j, i) => {
+        perOf[j] = per;
+        ticksOf[j] = ticks[i].map((t, q) => ({ timeSec: t.timeSec, bar: t.bar, first: q === 0, accent: q === 0 }));
+      });
+    }
+  });
+  // 2. two ticks closer than 0.6 beat (the seam of two grids): the one at a chord start wins, else the later one goes
+  const flat = [];
+  presentIdx.forEach((j) => ticksOf[j].forEach((t) => flat.push({ j, t })));
+  const dead = new Set();
+  let prev = null;
+  for (const cur of flat) {
+    if (prev && cur.t.timeSec - prev.t.timeSec < 0.6 * Math.min(perOf[prev.j], perOf[cur.j])) {
+      if (cur.t.first && !prev.t.first) { dead.add(prev.t); prev = cur; } else dead.add(cur.t);
+    } else prev = cur;
+  }
+  // 3. events, beats and sections
+  const events = [];
+  const beats = [];
+  const sections = [];
+  let beatCursor = 0;
+  let k = 0;
+  let prevEnd = 0;
   song.sections.forEach((sec, si) => {
     const startBeat = beatCursor;
     const first = k;
-    const ref = refBpm(si);
     let present = 0;
     sec.lines.forEach((line, li) => {
       line.chords.forEach((c, ci) => {
         const start = starts[k];
-        const end = ends[k];
-        const dur = Math.max(end - start, 1e-3);
-        const eb = alignment.eventBeats ? alignment.eventBeats[k] : null;
-        const n = measured[si] !== null && Number.isFinite(eb) && eb >= 1 ? Math.round(eb) : Math.max(1, Math.round((dur * ref) / 60));
-        const rel = beatCursor - startBeat;
-        const spb = dur / n;
         const eventIndex = events.length;
         if (skippedSet.has(k)) {
           // not in the audio: no time, no beats (the metronome and the highlight pass over it)
@@ -154,11 +218,13 @@ function buildAlignedTimeline(song, alignment, anchors, bpms, perBar) {
           return;
         }
         present++;
-        events.push({ ref: `${si}.${li}.${ci}`, name: c.name, mark: c.mark || '', rest: !!c.rest, sectionIndex: si, startBeat: beatCursor, beats: n, startSec: start, durSec: dur, bpm: 60 / spb });
-        for (let b = 0; b < n; b++) {
-          beats.push({ index: beatCursor + b, timeSec: start + b * spb, spb, sectionIndex: si, eventIndex, beatInBar: (rel + b) % perBar, isDownbeat: (rel + b) % perBar === 0 });
+        const dur = Math.max(endOf(k) - start, 1e-3);
+        const mine = ticksOf[k].filter((t) => !dead.has(t));
+        events.push({ ref: `${si}.${li}.${ci}`, name: c.name, mark: c.mark || '', rest: !!c.rest, sectionIndex: si, startBeat: beatCursor, beats: mine.length, startSec: start, durSec: dur, bpm: 60 / perOf[k] });
+        for (const t of mine) {
+          beats.push({ index: beatCursor, timeSec: t.timeSec, spb: perOf[k], sectionIndex: si, eventIndex, beatInBar: t.bar, isDownbeat: t.accent });
+          beatCursor++;
         }
-        beatCursor += n;
         k++;
       });
     });
@@ -166,14 +232,20 @@ function buildAlignedTimeline(song, alignment, anchors, bpms, perBar) {
     const firstP = Array.from({ length: k - first }, (_, i) => first + i).find((i) => !skippedSet.has(i));
     const lastP = Array.from({ length: k - first }, (_, i) => k - 1 - i).find((i) => !skippedSet.has(i));
     const secStart = present ? starts[firstP] : prevEnd;
-    const secEnd = present ? ends[lastP] : prevEnd;
+    const secEnd = present ? endOf(lastP) : prevEnd;
     prevEnd = secEnd;
     const dur = Math.max(secEnd - secStart, 1e-3);
-    const spb = count > 0 ? dur / count : 60 / bpms[si];
-    const bpm = 60 / spb;
-    sections.push({ index: si, startSec: secStart, endSec: secEnd, startBeat, endBeat: beatCursor, bpm, savedBpm: bpms[si], scale: bpms[si] / bpm, spb, anchored: !!(anchors && si > 0 && Number.isFinite(anchors[si])), aligned: true, skipped: sec.lines.length > 0 && present === 0 && k > first });
+    // the tempo shown is the measured one (the sync screen shows the same); a free-tempo section has the one of its neighbour
+    const bpm = present ? Math.round(refBpm(si) * 10) / 10 : 60 / (count > 0 ? dur / count : 60 / bpms[si]);
+    sections.push({ index: si, startSec: secStart, endSec: secEnd, startBeat, endBeat: beatCursor, bpm, savedBpm: bpms[si], scale: bpms[si] / bpm, spb: 60 / bpm, anchored: !!(anchors && si > 0 && Number.isFinite(anchors[si])), aligned: true, skipped: sec.lines.length > 0 && present === 0 && k > first });
   });
   return { events, beats, sections, totalBeats: beatCursor, totalSec: endSec, speed: 1, warnings, aligned: true, gaps };
+}
+
+// Ticks of every chord event of an aligned song (null for the ones not in the audio): the quarters the audio has.
+export function alignedEventBeats(song, alignment) {
+  const tl = buildTimeline(song, { alignment });
+  return tl.aligned ? tl.events.map((e) => (e.skipped ? null : e.beats)) : null;
 }
 
 // Greatest index i with list[i][key] <= value, or -1.

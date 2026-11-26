@@ -87,8 +87,12 @@ export function makeAlignment(result, song, createdAt = new Date().toISOString()
         // why a section cannot be trusted besides its own tempo: 'sisters' (it lasts differently from the sections with the same
         // chords), 'offgrid' (its changes miss the beats); null otherwise
         why: s.why === 'sisters' || s.why === 'offgrid' ? s.why : null,
+        // continuous grid of beats of a stable-tempo section (see beatgrid.js): the clicks of the metronome sit on it
+        grid: normalizeGrid(s.grid),
       };
     }),
+    // where the music of the audio ends (the clicks stop there); null: not known
+    musicEndSec: Number.isFinite(result.musicEndSec) ? r3(result.musicEndSec) : null,
     match: matchRatio(result) === null ? null : r3(matchRatio(result)),
     // the alignment was found in a transposition that does not clearly beat the others: it may be a different song
     // that shares some chords (not recognised, see alignmentRecognised)
@@ -100,6 +104,12 @@ export function makeAlignment(result, song, createdAt = new Date().toISOString()
     accepted: false,
     createdAt,
   };
+}
+
+// A stored grid { t0, per, dev[] } is kept only when it is sound (see beatgrid.js).
+function normalizeGrid(g) {
+  if (!g || !Number.isFinite(g.t0) || !(g.per > 0.1 && g.per < 2) || !Array.isArray(g.dev) || g.dev.length < 2 || g.dev.length > 5000 || !g.dev.every((d) => Number.isFinite(d))) return null;
+  return { t0: g.t0, per: g.per, dev: g.dev.map((d) => Math.round(d)) };
 }
 
 // Cleans a stored alignment (import, migration). Returns null for anything unusable.
@@ -127,7 +137,9 @@ export function normalizeAlignment(raw) {
       verified: !!(s && s.verified),
       skipped: !!(s && s.skipped),
       why: s && (s.why === 'sisters' || s.why === 'offgrid') ? s.why : null,
+      grid: normalizeGrid(s && s.grid),
     })),
+    musicEndSec: Number.isFinite(raw.musicEndSec) && raw.musicEndSec > last ? raw.musicEndSec : null,
     match: Number.isFinite(raw.match) ? raw.match : null,
     shiftUntrusted: !!raw.shiftUntrusted,
     forced: !!raw.forced,
@@ -333,8 +345,8 @@ export function exportTruth(song, alignment) {
 }
 
 // Brings the measured tempos and the durations in beats into the song (for studying with the
-// metronome with the real timing). Returns { sections, events } changed.
-export function applyMeasuredTiming(song, alignment) {
+// metronome with the real timing); `counts` (alignedEventBeats) are the quarters of every chord as the metronome plays them. Returns { sections, events } changed.
+export function applyMeasuredTiming(song, alignment, counts = null) {
   const idx = sectionEventIndices(song);
   const refs = eventRefs(song);
   let sections = 0;
@@ -346,7 +358,7 @@ export function applyMeasuredTiming(song, alignment) {
     sec.bpmSource = 'edited';
     sections++;
     for (const j of idx[si]) {
-      const b = alignment.eventBeats[j];
+      const b = counts ? counts[j] : alignment.eventBeats[j];
       if (!Number.isFinite(b) || b < 1) continue;
       const r = refs[j];
       song.sections[r.section].lines[r.line].chords[r.chord].beats = b;

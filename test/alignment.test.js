@@ -59,7 +59,7 @@ test('section states: confidence and free tempo', () => {
   assert.equal(countVerified(a), 1);
 });
 
-test('aligned timeline: events at the aligned instants, beats evenly spread, highlight follows the real timing', () => {
+test('aligned timeline: events at the aligned instants, ticks on a regular grid, highlight follows the real timing', () => {
   const s = song();
   const a = makeAlignment(result(), s);
   const tl = buildTimeline(s, { speed: 1, alignment: a });
@@ -67,22 +67,26 @@ test('aligned timeline: events at the aligned instants, beats evenly spread, hig
   assert.deepEqual(tl.events.map((e) => e.startSec), STARTS);
   assert.equal(tl.events[0].ref, '0.0.0');
   assert.equal(tl.events[3].ref, '0.1.1');
-  // event 0: 4 beats in 2.5 s
+  // section A has a stable tempo (98.7): its ticks are on one regular grid, whatever the chords do (no stored grid: a regular one
+  // with the phase of the chord starts)
+  const bA = tl.beats.filter((b) => b.sectionIndex === 0);
+  const per = 60 / 98.7;
+  for (let i = 1; i < bA.length; i++) assert.ok(Math.abs(bA[i].timeSec - bA[i - 1].timeSec - per) < 1e-6, `interval ${i}`);
+  // event 0 lasts 2.5 s: the ticks that fall in it (4)
   const b0 = tl.beats.filter((b) => b.eventIndex === 0);
   assert.equal(b0.length, 4);
-  assert.ok(Math.abs(b0[1].timeSec - 1.625) < 1e-9);
+  assert.ok(b0.every((b) => b.timeSec > 0.9 && b.timeSec < 3.6));
   assert.equal(eventIndexAtTime(tl, 3.49), 0);
   assert.equal(eventIndexAtTime(tl, 3.5), 1);
   assert.equal(eventIndexAtTime(tl, 0.5), -1);
   // last event ends at alignment.endSec
   assert.ok(Math.abs(tl.totalSec - a.endSec) < 1e-9);
-  // beat position <-> time are inverse even with different tempos per event
+  // beat position <-> time are inverse
   for (const t of [1.2, 4.0, 6.5, 7.3, 9.9, 12, 16]) assert.ok(Math.abs(timeAtBeatPosition(tl, beatPositionAtTime(tl, t)) - t) < 1e-6, String(t));
-  // sections: start/end and measured tempo
+  // sections: start/end; the tempo is the measured one (what the sync screen shows)
   assert.equal(tl.sections[0].startSec, 1);
   assert.equal(tl.sections[0].endSec, 9);
-  // (event 3 has no measured beats: 1.8 s at 98.7 bpm = 3 quarters, not the 2 of the sheet)
-  assert.ok(Math.abs(tl.sections[0].bpm - (13 * 60) / 8) < 1e-9);
+  assert.equal(tl.sections[0].bpm, 98.7);
   assert.equal(tl.sections[0].savedBpm, 100);
   // not used for the metronome-only timeline (speed != 1) or when it does not fit
   assert.ok(!buildTimeline(s, { speed: 0.8, alignment: a }).aligned);
@@ -179,25 +183,22 @@ test('alignment survives normalizeAudio, library export (stripAudio) and audioTi
   assert.equal(normalizeAudio({ fileName: 'x', alignment: { version: 1, eventStartSec: [2, 1] } }).alignment, undefined);
 });
 
-test('aligned timeline: one click per quarter, whatever the beats of the sheet say (round 10)', () => {
+test('aligned timeline: the quarters of a chord are the grid beats in it, not round(duration / period) (round 11)', () => {
   const s = song();
   const a = makeAlignment(result(), s);
   const tl = buildTimeline(s, { speed: 1, alignment: a });
-  // event 2 (Em): sheet 2 beats, measured 2 -> 2 clicks 1.2 s apart (2 quarters in 2.4 s... at 98.7 bpm a quarter is 0.608 s)
   const cnt = (j) => tl.beats.filter((b) => b.eventIndex === j).length;
   assert.equal(cnt(2), 2);
-  // section B has a free tempo: event 5 (sheet 8 beats) lasts 4 s = 7 quarters at the tempo of the nearest measured section
-  assert.equal(cnt(5), 7);
-  // a chord of 2 quarters at the measured tempo is exactly 2 beats even if the sheet says 4
-  const s2 = song();
-  s2.sections[0].lines[0].chords[0].beats = 4;
+  assert.equal(tl.events[2].beats, 2);
+  // section B has a free tempo: a tick on every change (accented), more only if the chord lasts 2 beats of the nearby tempo (98.7)
+  assert.equal(cnt(4), 3); // 2.0 s = 3.3 beats
+  const accents = tl.beats.filter((b) => b.sectionIndex === 1 && b.isDownbeat).map((b) => b.eventIndex);
+  assert.deepEqual(accents, [4, 5]);
+  // a chord shorter than 2 beats of the nearby tempo has one tick
   const r = result();
-  r.eventBeats = [null, 4, 2, null, 4, 8, null];
-  r.eventStartSec = [1, 2.2, 6, 7.2, 9, 11, 15]; // event 0 lasts 1.2 s = 2 quarters at 98.7 bpm
-  const tl2 = buildTimeline(s2, { speed: 1, alignment: makeAlignment(r, s2) });
-  assert.equal(tl2.beats.filter((b) => b.eventIndex === 0).length, 2);
-  assert.equal(tl2.events[0].beats, 2);
-  // free tempo section (B): clicks use the tempo of the nearest measured section, never several clicks in a short chord
-  const freeCounts = [4, 5].map((j) => tl.beats.filter((b) => b.eventIndex === j).length);
-  assert.ok(freeCounts.every((n) => n >= 1 && n <= Math.round((tl.events[4].durSec * 98.7) / 60) + 8));
+  r.eventStartSec = [1, 3.5, 6, 7.2, 9, 9.9, 15];
+  const tl2 = buildTimeline(s, { speed: 1, alignment: makeAlignment(r, s) });
+  assert.equal(tl2.events[4].beats, 1);
+  // the first chord of a stable section is on the first beat of the bar
+  assert.equal(tl.beats.find((b) => b.eventIndex === 0).beatInBar, 0);
 });
