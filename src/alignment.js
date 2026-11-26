@@ -6,8 +6,8 @@ export const ALIGNMENT_VERSION = 1;
 // section state from the confidence of the section (median of its changes); a free tempo (no stable beat) is yellow at most
 export const CONF_GREEN = 0.75;
 export const CONF_YELLOW = 0.5;
-// without a stable beat the colour is yellow at most (the engine caps the confidence of those changes at 0.55)
-export const CONF_YELLOW_FREE = 0.35;
+// without a stable beat the colour is yellow at most (the engine caps the confidence of those changes at 0.55); from 0.30 (round 10: 0.35 made 53% of the changes of the red sections right on the tester bench, 47% on all benches)
+export const CONF_YELLOW_FREE = 0.3;
 const MIN_GAP_SEC = 0.05;
 // music not in the sheet shorter than this (a bar of passage the sheet does not write) is not a gap: the previous chord
 // simply lasts longer
@@ -355,4 +355,84 @@ export function applyMeasuredTiming(song, alignment) {
   });
   if (events) song.timingSource = 'edited';
   return { sections, events };
+}
+
+// ---- quick fine correction (round 10): move a chord, the rest of its section, or a whole section a little ----
+// No chord may last less than this after a nudge, and the order of the times is never inverted.
+export const NUDGE_MIN_DUR_SEC = 0.1;
+
+// Copy of what a nudge changes (to undo it).
+export function snapshotTimes(alignment) {
+  return JSON.parse(JSON.stringify({ eventStartSec: alignment.eventStartSec, confidence: alignment.confidence, eventBeats: alignment.eventBeats, gaps: alignment.gaps || [], sections: alignment.sections, endSec: alignment.endSec }));
+}
+export function restoreTimes(alignment, snap) {
+  const c = JSON.parse(JSON.stringify(snap));
+  alignment.eventStartSec = c.eventStartSec;
+  alignment.confidence = c.confidence;
+  alignment.eventBeats = c.eventBeats;
+  alignment.gaps = c.gaps;
+  alignment.sections = c.sections;
+  alignment.endSec = c.endSec;
+}
+
+// Events (indices) that are really in the audio, in time order.
+function presentSet(alignment) {
+  const sk = new Set(alignment.skipped || []);
+  return alignment.eventStartSec.map((_, j) => j).filter((j) => !sk.has(j));
+}
+
+// Moves the events `list` (indices, consecutive among the present ones) by `deltaSec`, clamped so that the one before keeps
+// NUDGE_MIN_DUR_SEC and the one after too. Returns { ok, applied } (applied: the delta really used, 0 when there is no room).
+function shiftEvents(alignment, list, deltaSec) {
+  const present = presentSet(alignment);
+  const t = alignment.eventStartSec;
+  const first = present.indexOf(list[0]);
+  const last = present.indexOf(list[list.length - 1]);
+  if (first < 0 || last < 0) return { ok: false, reason: 'L’accordo non è nell’audio', applied: 0 };
+  const before = first > 0 ? t[present[first - 1]] + NUDGE_MIN_DUR_SEC : 0;
+  const after = last + 1 < present.length ? t[present[last + 1]] - NUDGE_MIN_DUR_SEC : Infinity;
+  let d = deltaSec;
+  if (t[list[0]] + d < before) d = before - t[list[0]];
+  if (t[list[list.length - 1]] + d > after) d = after - t[list[list.length - 1]];
+  // (a clamp that would reverse the direction of the request means there is no room)
+  if (Math.sign(d) !== Math.sign(deltaSec) && d !== 0) d = 0;
+  d = Math.round(d * 1000) / 1000;
+  if (d === 0) return { ok: false, reason: 'Non c’è spazio per spostare di più', applied: 0 };
+  for (const j of list) t[j] = Math.round((t[j] + d) * 1000) / 1000;
+  // a gap that no longer fits between its two chords is dropped
+  if (alignment.gaps) alignment.gaps = alignment.gaps.filter((g) => g.startSec >= t[g.before - 1] && g.endSec <= t[g.before] + 1e-6);
+  if (list[list.length - 1] === t.length - 1) alignment.endSec = Math.max(alignment.endSec + d, t[t.length - 1] + 0.2);
+  return { ok: true, applied: d };
+}
+
+function touch(alignment, song, si) {
+  const s = alignment.sections[si];
+  s.verified = true; // moved by hand: same weight as "verificata"
+  s.confidence = 1;
+  const j0 = sectionEventIndices(song)[si][0];
+  if (j0 !== undefined && !(alignment.skipped || []).includes(j0)) s.startSec = alignment.eventStartSec[j0];
+}
+
+// Moves chord `j` (index in reading order) by `deltaSec`; with `following` also the chords after it in its section.
+export function nudgeEvent(alignment, song, j, deltaSec, { following = false } = {}) {
+  const refs = eventRefs(song);
+  if (!refs[j]) return { ok: false, reason: 'Accordo inesistente', applied: 0 };
+  const si = refs[j].section;
+  const idx = sectionEventIndices(song)[si];
+  const sk = new Set(alignment.skipped || []);
+  const list = (following ? idx.filter((k) => k >= j) : [j]).filter((k) => !sk.has(k));
+  if (!list.length) return { ok: false, reason: 'L’accordo non è nell’audio', applied: 0 };
+  const r = shiftEvents(alignment, list, deltaSec);
+  if (r.ok) touch(alignment, song, si);
+  return r;
+}
+
+// Moves the whole section `si` by `deltaSec`.
+export function nudgeSection(alignment, song, si, deltaSec) {
+  const sk = new Set(alignment.skipped || []);
+  const list = (sectionEventIndices(song)[si] || []).filter((k) => !sk.has(k));
+  if (!list.length) return { ok: false, reason: 'La sezione non è nell’audio', applied: 0 };
+  const r = shiftEvents(alignment, list, deltaSec);
+  if (r.ok) touch(alignment, song, si);
+  return r;
 }

@@ -5,6 +5,7 @@
 import { domEl, domClear } from './dom.js';
 import { runAutoSync, AUTOSYNC_CANCELLED } from './audiodecode.js';
 import { openCorrection } from './correct.js';
+import { openNudgeSheet } from './nudgesheet.js';
 import { eventRefs, sectionState, sectionEventIndices, alignmentFits, alignmentRecognised, countVerified, shiftAlignment, applyMeasuredTiming, exportTruth, capAtYellow } from '../alignment.js';
 import { formatClock } from '../audiosync.js';
 import { formatBpm } from '../render.js';
@@ -175,6 +176,7 @@ export function createAutoSyncPanel({ song, getBlob, getPlayer, timelineWith, pe
             cut ? domEl('span', { class: 'as-cut' }, `−${cut} accordi`) : null),
           why ? domEl('div', { class: 'as-why' }, why) : null),
         domEl('button', { type: 'button', class: 'btn icon as-act', 'data-act': 'listen', 'aria-label': `Ascolta ${secName(si)}`, title: 'Ascolta', onclick: () => listenFrom((tsec ? tsec.startSec : 0) - 1) }, '▶'),
+        domEl('button', { type: 'button', class: 'btn icon as-act', 'data-act': 'nudge', 'aria-label': `Sposta ${secName(si)} di poco`, title: 'Sposta la sezione di poco', onclick: () => openNudgeSheet({ song, kind: 'section', index: si, name: secName(si), getPlayer, onChange: () => { rebuild(); refresh(); if (onChange) onChange(); } }) }, '⇄'),
         domEl('button', {
           type: 'button', class: 'btn icon as-act' + (st === 'yellow' || st === 'red' ? ' primary' : ''), 'data-act': 'correct', 'aria-label': `Correggi a orecchio ${secName(si)}`, title: 'Correggi a orecchio',
           onclick: () => correct(si),

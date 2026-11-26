@@ -309,8 +309,71 @@ async function clicks() {
   await browser.close();
 }
 
+// ---------------------------------------------------------------- nudge: quick fine correction of a chord and of a section
+async function nudge() {
+  dev = devName + '-nudge';
+  const { browser, page, errors } = await open();
+  await loadSynth(page);
+  await syncWith(page, path.join(AS, 'right.mp3'));
+  const a0 = await alignment(page);
+  // 1. a whole section by -0,05 s from the sync screen
+  const si = 2;
+  const idx = a0.names.map((_, j) => j);
+  await page.click(`.as-row[data-sec="${si}"] [data-act="nudge"]`);
+  await page.waitForSelector('#nudge-close');
+  await page.click('.nudge-sheet [data-s="-0.05"]');
+  await sleep(200);
+  let a1 = await alignment(page);
+  const moved = a1.eventStartSec.map((t, j) => (Math.abs(t - a0.eventStartSec[j]) > 1e-6 ? j : -1)).filter((j) => j >= 0);
+  const secEvents = moved.length;
+  rec('N1 the section moved by -0,05 s, only its chords', secEvents > 0 && moved.every((j) => Math.abs(a1.eventStartSec[j] - a0.eventStartSec[j] + 0.05) < 1e-3) && a1.sections[si].verified === true, `${secEvents} chords`);
+  await page.click('#nudge-undo');
+  await sleep(200);
+  a1 = await alignment(page);
+  rec('N2 «Annulla» restores the times and the state', JSON.stringify(a1.eventStartSec) === JSON.stringify(a0.eventStartSec) && a1.sections[si].verified === false);
+  await page.click('.nudge-sheet [data-s="-0.05"]');
+  await page.click('#nudge-close');
+  await closeSync(page);
+  // 2. a chord +0,25 s by long press in the sheet
+  await page.evaluate(() => { for (const d of document.querySelectorAll('details.sec')) d.open = true; });
+  const j = a0.names.length >> 1;
+  const ref = await page.evaluate((j) => window.__gapp.timeline.events[j].ref, j);
+  const chip = page.locator(`.ch[data-ref="${ref}"]`).first();
+  await chip.scrollIntoViewIfNeeded();
+  await sleep(700);
+  const box = await chip.boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await sleep(800);
+  await page.mouse.up();
+  await page.waitForSelector('#nudge-close', { timeout: 3000 });
+  const before = await alignment(page);
+  await page.click('.nudge-sheet [data-s="0.25"]');
+  await sleep(300);
+  const after = await alignment(page);
+  const d = after.eventStartSec[j] - before.eventStartSec[j];
+  rec('N3 one chord moved by +0,25 s, the neighbours did not', Math.abs(d - 0.25) < 1e-3 && after.eventStartSec[j - 1] === before.eventStartSec[j - 1] && after.eventStartSec[j + 1] === before.eventStartSec[j + 1]);
+  // the highlight follows: play, seek 0,1 s after the new time
+  await page.click('#nudge-close');
+  await page.click('#btn-play');
+  await page.waitForFunction(() => window.__gapp.player.state === 'playing', null, { timeout: 15000 });
+  const t = after.eventStartSec[j] + 0.1;
+  await page.evaluate((t) => { window.__gapp.audioEl.currentTime = t; }, t);
+  await sleep(500);
+  const cur = await page.evaluate(() => window.__gapp.player.eventIndex);
+  rec('N4 in play the highlight is on the moved chord 0,1 s after its new time', cur === j, `event ${cur} expected ${j}`);
+  await page.click('#btn-play').catch(() => {});
+  // undo and reload
+  await page.reload();
+  await page.waitForSelector('#btn-play', { timeout: 15000 });
+  const persisted = await alignment(page);
+  rec('N5 the nudges survive a reload', Math.abs(persisted.eventStartSec[j] - after.eventStartSec[j]) < 1e-6 && persisted.sections[si].verified === true);
+  rec('Nz no page errors', errors.length === 0, errors.join('|').slice(0, 100));
+  await browser.close();
+}
+
 (async () => {
-  const all = { texts, skip, gap, corr, clicks };
+  const all = { texts, skip, gap, corr, clicks, nudge };
   const list = mode === 'all' ? Object.keys(all) : [mode];
   for (const m of list) await all[m]();
   console.log(fails ? `${fails} FAIL` : 'ALL PASS');

@@ -11,6 +11,7 @@ import { audioTimelineOptions, formatClock } from '../audiosync.js';
 import { audioStoreGet, audioStoreDelete } from '../audiostore.js';
 import { getDevice } from '../storage.js';
 import { openSyncScreen } from './syncscreen.js';
+import { openNudgeSheet } from './nudgesheet.js';
 import { openAnchorSheet } from './anchorsheet.js';
 import { attachAudioFile, AUDIO_ACCEPT } from './audiofile.js';
 import { createPlayPanel } from './playpanel.js';
@@ -330,6 +331,12 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
         }, `⚓ ${formatClock(t)}`));
       }
     }
+    if (nudgeActive() && timeline.sections[si] && !timeline.sections[si].skipped) {
+      head.append(domEl('button', {
+        type: 'button', class: 'sec-nudge', 'data-sec': si, 'aria-label': 'Sposta la sezione di poco',
+        onclick: () => openNudgeSheet({ song, kind: 'section', index: si, name: sectionNameOf(si) || `Sezione ${si + 1}`, getPlayer: () => audioPlayer, onChange: () => { persist(); rebuildTimeline(); } }),
+      }, '⇄'));
+    }
     // long press on the header starts a section loop
     let timer = null;
     const cancel = () => {
@@ -347,6 +354,24 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
     for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) head.addEventListener(ev, cancel);
     head.addEventListener('contextmenu', (e) => e.preventDefault());
   }
+
+  // long press on a chord (with the automatic sync): quick fine correction of its time
+  const nudgeActive = () => !editMode && song.audio && song.audio.alignment && player === audioPlayer && !!audioPlayer && !!timeline.aligned;
+  let chordTimer = null;
+  const cancelChord = () => { if (chordTimer !== null) clearTimeout(chordTimer); chordTimer = null; };
+  bodyHolder.addEventListener('pointerdown', (e) => {
+    const ch = e.target.closest && e.target.closest('.ch[data-ref]');
+    if (!ch || !nudgeActive()) return;
+    cancelChord();
+    const ref = ch.getAttribute('data-ref');
+    chordTimer = setTimeout(() => {
+      chordTimer = null;
+      const j = timeline.events.findIndex((ev) => ev.ref === ref);
+      if (j < 0 || timeline.events[j].skipped) return;
+      openNudgeSheet({ song, kind: 'event', index: j, name: `Accordo ${timeline.events[j].name}`, getPlayer: () => audioPlayer, onChange: () => { persist(); rebuildTimeline(); } });
+    }, LONG_PRESS_MS);
+  });
+  for (const ev of ['pointerup', 'pointerleave', 'pointercancel', 'pointermove']) bodyHolder.addEventListener(ev, cancelChord);
 
   function startLoop(si) {
     if (editMode) return;

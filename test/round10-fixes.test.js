@@ -80,3 +80,51 @@ test('the reason of a section survives normalizeAlignment (and unknown ones are 
   const n = normalizeAlignment(JSON.parse(JSON.stringify(al)));
   assert.deepEqual(n.sections.map((s) => s.why), ['sisters', 'offgrid', null]);
 });
+
+import { nudgeEvent, nudgeSection, snapshotTimes, restoreTimes, NUDGE_MIN_DUR_SEC } from '../src/alignment.js';
+
+test('nudgeEvent: moves one chord, clamps between the neighbours, section becomes verified', () => {
+  const { song, al } = setup();
+  const r = nudgeEvent(al, song, 4, 0.25);
+  assert.equal(r.ok, true);
+  assert.equal(r.applied, 0.25);
+  assert.equal(al.eventStartSec[4], 30.25);
+  assert.equal(al.sections[1].verified, true);
+  const big = nudgeEvent(al, song, 4, 50); // clamps at next (40) - 0.1
+  assert.equal(big.ok, true);
+  assert.equal(al.eventStartSec[4], 40 - NUDGE_MIN_DUR_SEC);
+  assert.equal(nudgeEvent(al, song, 4, 1).ok, false); // no room
+  const back = nudgeEvent(al, song, 3, -50); // clamps at previous (10) + 0.1
+  assert.equal(al.eventStartSec[3], 10.1);
+  assert.equal(back.ok, true);
+  const t = al.eventStartSec;
+  for (let i = 1; i < t.length; i++) assert.ok(t[i] - t[i - 1] >= NUDGE_MIN_DUR_SEC - 1e-9, `order at ${i}`);
+});
+
+test('nudgeEvent following: the rest of the section moves together; limited by the next section', () => {
+  const { song, al } = setup();
+  const r = nudgeEvent(al, song, 4, 3, { following: true }); // events 4..7 (7 = F at 60): next section starts at 70
+  assert.equal(r.ok, true);
+  assert.equal(r.applied, 3);
+  assert.deepEqual(al.eventStartSec.slice(3), [20, 33, 43, 53, 63, 70]);
+  const big = nudgeEvent(al, song, 4, 20, { following: true });
+  assert.equal(al.eventStartSec[7], 70 - NUDGE_MIN_DUR_SEC);
+  assert.equal(big.ok, true);
+});
+
+test('nudgeSection: moves every chord of the section, never before the previous one; undo restores', () => {
+  const { song, al } = setup();
+  const snap = snapshotTimes(al);
+  const r = nudgeSection(al, song, 1, -0.05);
+  assert.equal(r.ok, true);
+  assert.deepEqual(al.eventStartSec.slice(2, 8), [9.95, 19.95, 29.95, 39.95, 49.95, 59.95]);
+  assert.equal(al.sections[1].startSec, 9.95);
+  assert.equal(nudgeSection(al, song, 1, -50).ok, true);
+  assert.ok(al.eventStartSec[2] >= 5 + NUDGE_MIN_DUR_SEC - 1e-9);
+  restoreTimes(al, snap);
+  assert.deepEqual(al.eventStartSec, [0, 5, 10, 20, 30, 40, 50, 60, 70]);
+  assert.equal(al.sections[1].verified, false);
+  // a section that is skipped can not move
+  al.skipped = [8];
+  assert.equal(nudgeSection(al, song, 2, 1).ok, false);
+});
