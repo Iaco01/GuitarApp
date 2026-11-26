@@ -1,10 +1,10 @@
-// Round 11 tester: open defect on the real (copyrighted, gitignored) song. Times and counts only; skipped without the fixture.
-// Not part of the `npm test` glob (test/*.test.js): run with `node --test test/regression/`.
+// Round 12: the defect of the round 11 tester (bug 1, event 306) is fixed and these are normal tests now. Real (copyrighted, gitignored)
+// song, times only; skipped without the fixture.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { loadReal, realSkip } from '../fixtures/real-helper.mjs';
+import { loadReal, realSkip } from './fixtures/real-helper.mjs';
 
-const opts = { skip: realSkip, todo: 'bug 1 of round 11: the chroma-lead rule moves event 306 (D in Verse 6) 0.68 s early' };
+const opts = { skip: realSkip };
 
 test('real song: event 306 (D, Verse 6) stays within 0.3 s of where the G ends (round 10: 473.83 s, round 11: 473.15 s)', opts, () => {
   const { whole } = loadReal();

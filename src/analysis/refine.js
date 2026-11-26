@@ -83,8 +83,17 @@ function attacks(feat, t0, t1) {
 const LEAD_MIN = 0.3;
 const LEAD_DIFF = 0.1;
 const LEAD_AVG = 0.08;
+// Round 12 (event 306: G -> D, D is inside G and the passing notes of the bass raised the chroma of D 0.6 s early): the lead only counts when
+// the new chord has a note that the old one lacks and that note rises in the chroma, AND the bass moves to the root of the new chord at
+// that instant (a passing note is not a change of chord). (An attack at the instant would be the natural test, but these changes are
+// the ones where the onset envelope has none.)
+const LEAD_NOTE_RISE = 0.1;
+const LEAD_BASS_RISE = 0.05; // the bass share of the new root rises (event 32: +0.11; event 306: -0.12)
 function chromaLead(feat, t, next, prev, from) {
   if (!prev) return null;
+  const dist = [...tonesOf(next)].filter((k) => !tonesOf(prev).has(k));
+  if (!dist.length) return null;
+  const distSet = new Set(dist);
   const cosAt = (w, f) => {
     let sd = 0;
     let n2 = 0;
@@ -99,7 +108,16 @@ function chromaLead(feat, t, next, prev, from) {
     if (diff(f) < LEAD_DIFF) continue;
     let m = 0;
     for (let q = 0; q < ahead; q++) m += diff(f + q);
-    if (m / ahead >= LEAD_AVG) return Math.max(0, f / feat.fps - 0.05);
+    if (m / ahead < LEAD_AVG) continue;
+    const at = Math.max(0, f / feat.fps - 0.05);
+    const rise = chromaShare(feat, distSet, at + 0.05, at + 0.35) - chromaShare(feat, distSet, at - 0.4, at - 0.05);
+    if (rise < LEAD_NOTE_RISE) continue;
+    if (prev.bass !== next.bass) {
+      const rootAfter = bassShare(feat, next.bass, at + 0.05, at + 0.4);
+      const rootBefore = bassShare(feat, next.bass, at - 0.4, at - 0.05);
+      if (rootAfter - rootBefore < LEAD_BASS_RISE) continue;
+    }
+    return at;
   }
   return null;
 }
