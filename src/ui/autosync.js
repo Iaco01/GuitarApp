@@ -168,7 +168,10 @@ export function createAutoSyncPanel({ song, getBlob, getPlayer, timelineWith, pe
       const why = sectionWhy(s, st);
       rows.append(domEl('li', { class: 'as-row', 'data-sec': si, 'data-state': st },
         domEl('span', { class: 'as-dot', 'aria-hidden': 'true' }),
-        domEl('div', { class: 'as-info' },
+        domEl('div', {
+          class: 'as-info as-nudge', role: 'button', tabindex: '0', 'data-act': 'nudge', title: 'Tocca per spostare la sezione di poco', 'aria-label': `Sposta ${secName(si)} di poco`,
+          onclick: () => openNudgeSheet({ song, kind: 'section', index: si, name: secName(si), getPlayer, onChange: () => { rebuild(); refresh(); if (onChange) onChange(); } }),
+        },
           domEl('div', { class: 'as-top' }, domEl('span', { class: 'as-name' }, secName(si)), domEl('span', { class: 'as-time' }, formatClock(tsec ? tsec.startSec : 0))),
           domEl('div', { class: 'as-sub' },
             domEl('span', { class: 'as-state' }, AS_STATE_TEXT[st]),
@@ -176,7 +179,6 @@ export function createAutoSyncPanel({ song, getBlob, getPlayer, timelineWith, pe
             cut ? domEl('span', { class: 'as-cut' }, `−${cut} accordi`) : null),
           why ? domEl('div', { class: 'as-why' }, why) : null),
         domEl('button', { type: 'button', class: 'btn icon as-act', 'data-act': 'listen', 'aria-label': `Ascolta ${secName(si)}`, title: 'Ascolta', onclick: () => listenFrom((tsec ? tsec.startSec : 0) - 1) }, '▶'),
-        domEl('button', { type: 'button', class: 'btn icon as-act', 'data-act': 'nudge', 'aria-label': `Sposta ${secName(si)} di poco`, title: 'Sposta la sezione di poco', onclick: () => openNudgeSheet({ song, kind: 'section', index: si, name: secName(si), getPlayer, onChange: () => { rebuild(); refresh(); if (onChange) onChange(); } }) }, '⇄'),
         domEl('button', {
           type: 'button', class: 'btn icon as-act' + (st === 'yellow' || st === 'red' ? ' primary' : ''), 'data-act': 'correct', 'aria-label': `Correggi a orecchio ${secName(si)}`, title: 'Correggi a orecchio',
           onclick: () => correct(si),
