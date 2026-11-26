@@ -17,7 +17,7 @@ test('finds the shift of a piece against what is placed, in samples', () => {
     const mono = new Float32Array(4000);
     for (let i = 0; i < 4000; i++) mono[i] = out[5000 + i - shift];
     const r = correlateShift(out, 5000, mono, 0, 4000, 200);
-    assert.equal(r.shift, shift);
+    assert.equal(r.shift, -shift); // (mono holds the signal `shift` late: it belongs `shift` samples earlier)
     assert.ok(r.corr > 0.99);
   }
 });
