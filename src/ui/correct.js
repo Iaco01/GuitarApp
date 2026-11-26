@@ -16,7 +16,7 @@ const REACTION_MIN_MS = -200;
 const REACTION_MAX_MS = 600;
 const STOP_HINT = 'Puoi fermarti quando vuoi: i tocchi fatti vengono salvati.';
 // the chords left without a tap: all of them when they are few, otherwise how many
-const MANY_CHORDS = 6;
+const MANY_CHORDS = 8;
 
 // song, sectionIndex, name: what to correct. getPlayer(): the audio player of the sync screen.
 // timelineWith(alignmentOrNull): timeline for an alignment (null = the saved one). addFrameListener(fn) -> remove().

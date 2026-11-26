@@ -21,7 +21,7 @@ const AS_WHY_WEAK = 'tempi poco netti';
 export const AS_GAP_LONG_SEC = 6;
 export const AS_GAP_NOTE = 'nessuna azione richiesta';
 // when more chords than this are left without a tap in a correction, say how many instead of listing them
-export const AS_MANY_MISSING = 6;
+export const AS_MANY_MISSING = 8;
 
 // The line that says why a section is not "sicura" (null for the others). `section`: { bpm, why } of the alignment.
 export function sectionWhy(section, state) {
