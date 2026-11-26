@@ -8,7 +8,8 @@ import { alignEventsSteps, snapToOnsets, snapToBeats, gridBonusFrames, chordTemp
 import { freeBoundary, FREE_CONF_MAX } from './refine.js';
 import { estimateSongDurations } from '../durations.js';
 import { effectiveSectionBpms } from '../model.js';
-import { GAP_MIN_SEC } from '../alignment.js';
+import { GAP_MIN_SEC, sectionState } from '../alignment.js';
+import { sisterGroups, sisterFlags, offGridShare } from './coherence.js';
 
 const ONSET_LEAD = 0;
 const BPM_CONF_MIN = 0.35;
@@ -29,6 +30,19 @@ const BAD_SHARE_LO = 0.1;
 const BAD_SHARE_HI = 0.35;
 // share of the stable sections that must agree with their own tempo for the durations of the sheet to be trusted
 const PRIOR_FIT_MIN = 0.6;
+// coherence checks that do not depend on the durations of the sheet (see coherence.js): a section that cannot be green
+// is capped just under the green threshold; one that is certainly wrong (far from its sisters) is capped in the red
+const COH_CAP_YELLOW = 0.7;
+const COH_CAP_RED = 0.4;
+// a stable-beat section whose changes mostly miss the beat grid cannot be green
+const OFF_GRID_MAX = 0.5;
+// the section that is far shorter than its sisters is tried again with a cheaper skip (per event)
+const SKIP_SUSPECT = 2;
+// the audio may be shorter than the sheet: fractions of the sheet that the audio is supposed to cover, tried when the
+// result with the whole sheet looks poor (see alignEventsSteps: s0Frac)
+const COVER_TRIES = [0.7, 0.45, 0.28];
+// share of the sections (not skipped) that must not be red for the result to be called decent
+const DECENT_SHARE = 0.6;
 const EVID_LO = 0.08;
 const EVID_FULL = 0.3;
 const ramp = (x, lo, hi) => Math.max(0, Math.min(1, (x - lo) / (hi - lo)));
@@ -116,15 +130,124 @@ export function* analyseAndAlignSteps({ samples, sampleRate, song, onProgress = 
   const hints = effectiveSectionBpms(song);
   const tg = yield* tempoCurvesSteps(feat.onset, feat.onsetFps);
   yield;
-  let { startSec, endSec, sections, eventBeats, grids, confidence, gaps, skipped } = yield* describe(al);
+  const first = yield* describe(al);
+  if (!first) return null;
+  let cur = { al, ...first };
+  // two situations that the first pass can get wrong, both seen on a real recording (see searchBetter):
+  // the audio is shorter than the sheet (the sections are squeezed into it) and a whole section of the sheet is not in
+  // the audio (its neighbours are squeezed instead)
+  if (opts.search !== false) cur = yield* searchBetter(al, cur);
+  al = cur.al;
+  const searchLog = cur.searchLog || [];
+  let { startSec, endSec, sections, eventBeats, grids, confidence, gaps, skipped, sisters } = cur;
   let finalAl = al;
   if (opts.regrid && grids.length) {
     // second pass: the boundaries of the stable stretches are drawn to the beat / half-beat grid
     const gb = gridBonusFrames(grids, feat.fps, feat.frames, { gamma: opts.gridGamma ?? 4, width: opts.gridWidth ?? 0.3 });
     const al2 = yield* alignEventsSteps(feat, events, { onset: feat.onset, ...(opts.align || {}), shift: al.shift, gridBonus: gb });
-    if (al2) { finalAl = al2; ({ startSec, endSec, sections, eventBeats, grids, confidence, gaps, skipped } = yield* describe(al2)); }
+    if (al2) { finalAl = al2; ({ startSec, endSec, sections, eventBeats, grids, confidence, gaps, skipped, sisters } = yield* describe(al2)); }
   }
   tk = lap('regrid', tk);
+
+  // How many events every section has, and how well a described alignment fits: events of green sections count 1, of
+  // yellow ones 0.5 (a small share of the confidences breaks the ties); skipped sections count nothing.
+  function sectionSizes() {
+    const n = song.sections.map(() => 0);
+    events.forEach((e) => { n[e.section]++; });
+    return n;
+  }
+  function fit(d, except = null) {
+    const sizes = sectionSizes();
+    let g = 0;
+    d.sections.forEach((s, si) => {
+      if (!sizes[si] || s.skipped || (except && except.includes(si))) return;
+      const st = sectionState({ sections: d.sections }, si);
+      g += sizes[si] * (st === 'green' ? 1 : st === 'yellow' ? 0.5 : 0) + 0.02 * sizes[si] * s.confidence;
+    });
+    return g;
+  }
+  function decent(d) {
+    const sizes = sectionSizes();
+    let n = 0;
+    let red = 0;
+    d.sections.forEach((s, si) => {
+      if (!sizes[si] || s.skipped) return;
+      n++;
+      if (sectionState({ sections: d.sections }, si) === 'red') red++;
+    });
+    return n > 0 && 1 - red / n >= DECENT_SHARE;
+  }
+  // sections that are far shorter than their sisters (same chords): a section that the audio lacks leaves its neighbours
+  // squeezed, and the engine pays 12 per event to skip it
+  function suspects(d) {
+    const out = [];
+    (d.sisters || []).forEach((f, si) => { if (f && f.kind === 'short' && !d.sections[si].skipped) out.push(si); });
+    return out;
+  }
+  function* searchBetter(a1, d1) {
+    let best = { al: a1, ...d1 };
+    const dbg = [];
+    dbg.push(`first: fit ${fit(d1).toFixed(1)}, ${decent(d1) ? 'decent' : 'poor'}`);
+    // (1) a result that is poor as a whole: the audio may cover only the first part of the sheet. The frames per beat that
+    // the first pass starts from assume that the audio covers the whole sheet; try shorter parts
+    if (!decent(best)) {
+      const share = (d) => {
+        let all = 0;
+        let here = 0;
+        events.forEach((e, k) => { all += e.priorBeats; if (!d.skipped[k]) here += e.priorBeats; });
+        return all > 0 ? here / all : 1;
+      };
+      const tryCover = function* (f) {
+        // (the transposition is searched again: with the sections squeezed it may have been chosen wrongly)
+        const a = yield* alignEventsSteps(feat, events, { onset: feat.onset, ...(opts.align || {}), s0Frac: f });
+        if (!a) return null;
+        a.s0Frac = f;
+        const d = yield* describe(a);
+        return d ? { al: a, ...d } : null;
+      };
+      for (const f of COVER_TRIES) {
+        let c = yield* tryCover(f);
+        if (!c) continue;
+        // (only a result that leaves the end of the sheet out is a cut recording: otherwise it is a different explanation of
+        // an audio that is not shorter)
+        if (!c.skipped[events.length - 1]) { dbg.push(`cover ${f}: end of the sheet not skipped`); continue; }
+        dbg.push(`cover ${f}: fit ${fit(c).toFixed(1)} decent ${decent(c)} share ${share(c).toFixed(2)}`);
+        if (decent(c)) {
+          // the share of the sheet that the result puts in the audio is a better guess than the one it started from
+          const f2 = share(c);
+          if (Math.abs(f2 / f - 1) > 0.1) {
+            const c2 = yield* tryCover(f2);
+            if (c2) dbg.push(`refined ${f2.toFixed(2)}: fit ${fit(c2).toFixed(1)} decent ${decent(c2)}`);
+            if (c2 && fit(c2) >= fit(c) - 1) c = c2;
+          }
+        }
+        if (fit(c) > fit(best) * 1.1 + 5) best = c;
+        if (decent(best)) break;
+        yield;
+      }
+    }
+    // (2) a section much shorter than its sisters: it may be a neighbour squeezed because a section is missing
+    for (let round = 0; round < 2; round++) {
+      const sus = suspects(best).filter((si) => !(best.al.skipCost && best.al.skipCost[si] !== undefined));
+      if (!sus.length) break;
+      const skipCost = { ...(best.al.skipCost || {}) };
+      sus.forEach((si) => { skipCost[si] = SKIP_SUSPECT; });
+      const a = yield* alignEventsSteps(feat, events, { onset: feat.onset, ...(opts.align || {}), shift: best.al.shift, s0Frac: best.al.s0Frac, skipCost });
+      if (!a) break;
+      a.skipCost = skipCost;
+      a.s0Frac = best.al.s0Frac;
+      const d = yield* describe(a);
+      if (!d) break;
+      dbg.push(`suspects ${sus.map((x) => x + 1)}: fit ${fit(d, sus).toFixed(1)} vs ${fit(best, sus).toFixed(1)}, suspects after ${suspects(d).map((x) => x + 1)}`);
+      // better when fewer sections are wrong in length and the others are not worse (the suspects themselves do not count:
+      // a section squeezed into the wrong place would otherwise score as a yellow one)
+      if (suspects(d).length < suspects(best).length && fit(d, sus) >= fit(best, sus) - 1) best = { al: a, ...d };
+      else break;
+      yield;
+    }
+    best.searchLog = dbg;
+    return best;
+  }
 
   // tempo, beat grid and boundary refinement from an alignment
   function* describe(a0) {
@@ -234,6 +357,7 @@ export function* analyseAndAlignSteps({ samples, sampleRate, song, onProgress = 
       const conf = median(idx.map((j) => confidence[j]));
       sections.push({ startSec: secStart, endSec: secEnd, bpm, confidence: conf, badTempoShare: cons ? cons.badShare : 0, bpmConfidence: bpmConf, beatGrid, tempoCandidate: pick.bpm, regularity: reg, beatTimes });
       if (beatGrid) {
+        sections[sections.length - 1].offGrid = offGridShare(idx.map((j) => startSec[j]), beatTimes, bpm);
         const snapped = snapToBeats(idx.map((j) => startSec[j]), beatTimes, bpm, opts.snapTol ?? 0.2, !!opts.snapHalf);
         idx.forEach((j, k) => { startSec[j] = snapped[k]; });
         pendingBeats.push({ idx, bpm });
@@ -247,6 +371,27 @@ export function* analyseAndAlignSteps({ samples, sampleRate, song, onProgress = 
         sections[si].confidence = median(idx.map((j) => confidence[j])) * (1 - ramp(cons.badShare, BAD_SHARE_LO, BAD_SHARE_HI));
       }
     }
+    // coherence that does not depend on the durations of the sheet (see coherence.js)
+    const secInfo = song.sections.map((_, si) => {
+      const all = events.map((e, j) => (e.section === si ? j : -1)).filter((j) => j >= 0);
+      const here = all.filter((j) => !skipped[j]);
+      return { all, here, spanSec: here.length ? startSec[here[here.length - 1]] - startSec[here[0]] : 0, bpm: sections[si] ? sections[si].bpm : null, complete: here.length > 0 && here.length === all.length };
+    });
+    const sisters = sisterFlags(sisterGroups(events), secInfo);
+    const capSection = (si, cap) => {
+      const s = sections[si];
+      if (!s || s.skipped || !(s.confidence > cap)) return;
+      s.confidence = cap;
+      secInfo[si].here.forEach((j) => { confidence[j] = Math.min(confidence[j], cap); });
+      s.capped = true;
+    };
+    sisters.forEach((f, si) => {
+      if (!f) return;
+      capSection(si, f.severe ? COH_CAP_RED : COH_CAP_YELLOW);
+      // the boundary with a wrong section is not reliable on either side
+      if (f.severe) for (const nb of [si - 1, si + 1]) if (nb >= 0 && nb < sections.length) capSection(nb, COH_CAP_YELLOW);
+    });
+    sections.forEach((s, si) => { if (s && s.beatGrid && s.offGrid > OFF_GRID_MAX) capSection(si, COH_CAP_YELLOW); });
     // an event that precedes music not in the sheet ends where that music starts
     present.forEach((j, k) => {
       if (k + 1 >= present.length) return;
@@ -260,7 +405,7 @@ export function* analyseAndAlignSteps({ samples, sampleRate, song, onProgress = 
       if (e.length) { s.startSec = startSec[e[0]]; s.endSec = endSec[e[e.length - 1]]; }
     });
     const gaps = bigGaps.map((g) => ({ before: g.prev + 1, startSec: endSec[g.prev], endSec: startSec[g.before] })).filter((g) => g.endSec - g.startSec >= GAP_MIN_SEC);
-    return { startSec, endSec, sections, eventBeats, grids, confidence, gaps, skipped };
+    return { startSec, endSec, sections, eventBeats, grids, confidence, gaps, skipped, sisters };
   }
   al = finalAl;
   if (onProgress) onProgress(1);
@@ -273,6 +418,8 @@ export function* analyseAndAlignSteps({ samples, sampleRate, song, onProgress = 
     eventBeats,
     gaps,
     skipped,
+    searchLog,
+    sisters: sisters.map((f) => (f ? { ratio: Math.round(f.ratio * 100) / 100, kind: f.kind, severe: f.severe } : null)),
     transposeFound: wrapSemis(al.shift),
     transposeMargin: al.shiftMargin,
     transposeScore: al.shiftScore,
