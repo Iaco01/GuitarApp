@@ -7,8 +7,17 @@ import { buildTimeline } from './timeline.js';
 // A tempo suggestion needs a timing error above both limits (a tap is never more precise than this).
 export const SYNC_ERR_MIN_SEC = 0.15;
 export const SYNC_ERR_REL = 0.003;
-export const LATENCY_MIN_MS = -100;
-export const LATENCY_MAX_MS = 400;
+// (round 12: wide enough for a half second of lateness, which a phone with a Bluetooth speaker or a decoder offset can have)
+export const LATENCY_MIN_MS = -1000;
+export const LATENCY_MAX_MS = 1000;
+export const OFFSET_STEP_MS = 50;
+
+// Text of the highlight offset control. The offset is the opposite of the latency: a negative latency makes the highlight earlier.
+export function offsetLabel(latencyMs) {
+  const ms = Math.round(-(Number(latencyMs) || 0));
+  if (ms === 0) return 'a tempo (0 ms)';
+  return ms > 0 ? `in anticipo di ${ms} ms` : `in ritardo di ${-ms} ms`;
+}
 
 // Anchors handed to buildTimeline: the offset anchors section 0.
 export function audioAnchors(audio) {

@@ -160,8 +160,9 @@ test('formatClock, latency helpers, file match, normalizeAudio', () => {
   assert.equal(formatClock(5), '0:05,0');
   assert.equal(formatClock(0), '0:00,0');
   assert.equal(formatClock(-1.25), '−0:01,3');
-  assert.equal(clampLatencyMs(900), 400);
-  assert.equal(clampLatencyMs(-500), -100);
+  assert.equal(clampLatencyMs(1500), 1000);
+  assert.equal(clampLatencyMs(-1500), -1000);
+  assert.equal(clampLatencyMs(-500), -500);
   assert.equal(clampLatencyMs('x'), 0);
   assert.equal(initialLatencyMs(120, 0.3), 120);
   assert.equal(initialLatencyMs(undefined, 0.18), 180);
@@ -199,4 +200,11 @@ test('audio metadata survives migrateSong and is cleaned', () => {
   assert.deepEqual(s.audio.anchors, { 1: 2 });
   assert.equal(migrateSong({ ...demo(), audio: 'junk' }).audio, null);
   assert.equal(validateSong({ ...demo(), audio: 5 }).ok, false);
+});
+
+test('offset label: the offset is the opposite of the latency (round 12)', async () => {
+  const { offsetLabel } = await import('../src/audiosync.js');
+  assert.equal(offsetLabel(0), 'a tempo (0 ms)');
+  assert.equal(offsetLabel(-150), 'in anticipo di 150 ms');
+  assert.equal(offsetLabel(200), 'in ritardo di 200 ms');
 });

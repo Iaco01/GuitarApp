@@ -467,3 +467,9 @@ h1, h2, h3, p, ul, ol, dl, dd { margin: 0; }
 .nudge-scope { display: grid; gap: 6px; margin: 8px 0; }
 .nudge-opt { min-height: 36px; display: flex; align-items: center; gap: 6px; }
 .as-nudge { cursor: pointer; min-height: 44px; }
+
+/* highlight offset (round 12): in the "more" menu of the play panel, audio only */
+.pp-offset { flex: 1 1 100%; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding-top: 4px; border-top: 1px solid var(--line, rgba(128,128,128,.3)); }
+.pp-off-title { font-size: 13px; color: var(--muted); }
+.pp-off-ctl { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.pp-off-val { font-size: 14px; min-width: 9em; text-align: center; }

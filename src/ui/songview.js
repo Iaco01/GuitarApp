@@ -7,7 +7,7 @@ import { buildTimeline } from '../timeline.js';
 import { GAP_MIN_SEC, alignmentFits } from '../alignment.js';
 import { createPlayer } from '../player.js';
 import { createAudioPlayer } from '../audio.js';
-import { audioTimelineOptions, formatClock } from '../audiosync.js';
+import { audioTimelineOptions, formatClock, clampLatencyMs, offsetLabel, OFFSET_STEP_MS } from '../audiosync.js';
 import { audioStoreGet, audioStoreDelete } from '../audiostore.js';
 import { getDevice, saveDevice } from '../storage.js';
 import { openSyncScreen } from './syncscreen.js';
@@ -140,11 +140,20 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
   function bpmLocked() { return player === audioPlayer && !!audioPlayer && !!timeline.aligned; }
   function paintBpmLock() { if (panel) panel.setBpmLocked(bpmLocked()); }
 
+  let listenToken = 0;
+  function paintOffset() {
+    if (!panel) return;
+    if (!audioPlayer) { panel.setOffset(null); return; }
+    const lat = getDevice().latencyMs;
+    panel.setOffset(offsetLabel(Number.isFinite(lat) ? lat : 0));
+  }
+
   // ---- audio file: load from IndexedDB, switch between metronome and audio ----
   function destroyAudioPlayer() {
     if (audioPlayer) audioPlayer.destroy();
     audioPlayer = null;
     delete gapp.audioEl;
+    paintOffset();
   }
 
   function useMetronomePlayer() {
@@ -192,6 +201,7 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
     if (player !== audioPlayer) metroPlayer.stop();
     player = audioPlayer;
     gapp.audioEl = audioPlayer.element;
+    paintOffset();
     audioStatus = 'ready';
     metronomeOn = !!song.audio.metronome;
     audioPlayer.setMetronome(metronomeOn);
@@ -782,11 +792,13 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
     diagramSvg: smallDiagramSvg,
     onLoopExit: () => { player.setLoop(null); setLoopUi(null); },
     onPlayPause: () => {
+      listenToken++;
       const st = player.getState();
       if (st === 'playing' || st === 'counting') player.pause();
       else player.play();
     },
     onStop: () => {
+      listenToken++;
       player.setLoop(null);
       setLoopUi(null);
       player.stop();
@@ -796,6 +808,22 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
       // with audio the media time does not depend on the speed: only the playback rate changes
       if (audioPlayer) audioPlayer.setRate(v);
       rebuildTimeline();
+    },
+    onOffset: (dir) => {
+      if (!audioPlayer) return;
+      const cur = Number.isFinite(getDevice().latencyMs) ? getDevice().latencyMs : 0;
+      const next = clampLatencyMs(cur - dir * OFFSET_STEP_MS);
+      try { saveDevice({ ...getDevice(), latencyMs: next }); } catch { /* no storage: the value holds for this session */ }
+      audioPlayer.setLatency(next);
+      paintOffset();
+    },
+    onOffsetListen: () => {
+      if (!audioPlayer) return;
+      // plays 5 s from the current place (or a moment before it, to hear the chord change) and stops
+      const token = ++listenToken;
+      const t = audioPlayer.getState() === 'stopped' ? Math.max(0, audioPlayer.getInfo().timeSec) : audioPlayer.currentTime();
+      audioPlayer.playFromTime(Math.max(0, t - 0.5));
+      setTimeout(() => { if (token === listenToken && audioPlayer && audioPlayer.getState() === 'playing') audioPlayer.pause(); }, 5000);
     },
     onMetronome: (on) => {
       metronomeOn = on;
@@ -868,6 +896,7 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
     },
   });
   paintBpmLock();
+  paintOffset();
 
   // ---- duration editing ----
   const editInfo = domEl('div', { class: 'eb-info', id: 'eb-info' }, 'Tocca un accordo per cambiarne i battiti');

@@ -8,7 +8,7 @@ const SPEED_MIN = 50;
 const SPEED_MAX = 100;
 
 // `diagramSvg(label)` (optional) returns the small SVG of a chord shown next to its name.
-export function createPlayPanel(song, { onLoopExit = null, onPlayPause, onStop, onSpeed, onMetronome, onTap, speedPct = 100, metronomeOn = true, diagramSvg = null, diagramsOn = true, onDiagrams = null, onNoticeClosed = null, onBpmStep = null, onBpmSet = null, onScope = null, onBpmUndo = null, bpmScope = 'all', rhythmOn = true, onRhythm = null }) {
+export function createPlayPanel(song, { onLoopExit = null, onPlayPause, onStop, onSpeed, onMetronome, onTap, speedPct = 100, metronomeOn = true, diagramSvg = null, diagramsOn = true, onDiagrams = null, onNoticeClosed = null, onBpmStep = null, onBpmSet = null, onScope = null, onBpmUndo = null, bpmScope = 'all', rhythmOn = true, onRhythm = null, onOffset = null, onOffsetListen = null }) {
   const perBar = (song.timeSignature && song.timeSignature[0]) || 4;
   let speed = speedPct;
   let metro = metronomeOn;
@@ -167,7 +167,16 @@ export function createPlayPanel(song, { onLoopExit = null, onPlayPause, onStop, 
     rhBtn.textContent = rhOn ? 'Ritmo: sì' : 'Ritmo: no';
     el.classList.toggle('pp-norhythm', !rhOn);
   }
-  const more = domEl('div', { class: 'pp-more', id: 'pp-more', hidden: true }, speedBox, metroBtn, tapBtn, dgBtn, rhBtn, stopBtn);
+  // highlight earlier / later (audio only): the latency of the device, in steps of 50 ms, with a 5 s listen to hear the effect
+  const offLbl = domEl('output', { class: 'pp-off-val', id: 'pp-offset-val', 'aria-live': 'polite' }, '');
+  const offRow = domEl('div', { class: 'pp-offset', id: 'pp-offset', hidden: true, role: 'group', 'aria-label': 'Evidenziazione in anticipo o in ritardo' },
+    domEl('span', { class: 'pp-off-title' }, 'Evidenziazione'),
+    domEl('div', { class: 'pp-off-ctl' },
+      domEl('button', { type: 'button', class: 'btn', id: 'btn-offset-later', 'aria-label': 'Evidenzia 50 millisecondi più tardi', onclick: () => { if (onOffset) onOffset(-1); } }, 'Più tardi'),
+      offLbl,
+      domEl('button', { type: 'button', class: 'btn', id: 'btn-offset-earlier', 'aria-label': 'Evidenzia 50 millisecondi prima', onclick: () => { if (onOffset) onOffset(1); } }, 'Prima')),
+    domEl('button', { type: 'button', class: 'btn small', id: 'btn-offset-listen', onclick: () => { if (onOffsetListen) onOffsetListen(); } }, 'Ascolta e regola (5 s)'));
+  const more = domEl('div', { class: 'pp-more', id: 'pp-more', hidden: true }, speedBox, metroBtn, tapBtn, dgBtn, rhBtn, stopBtn, offRow);
   const moreBtn = domEl('button', {
     type: 'button', class: 'btn pp-more-btn', id: 'btn-more', 'aria-label': 'Altri comandi', 'aria-expanded': 'false', 'aria-controls': 'pp-more',
     onclick: () => {
@@ -299,6 +308,11 @@ export function createPlayPanel(song, { onLoopExit = null, onPlayPause, onStop, 
       metroBtn.setAttribute('aria-pressed', String(metro));
       metroBtn.textContent = metro ? 'Clic: sì' : 'Clic: no';
       paintClick();
+    },
+    // text of the offset control, or null to hide it (no audio)
+    setOffset(text) {
+      offRow.hidden = text === null;
+      if (text !== null) offLbl.textContent = text;
     },
     setLoop(name) {
       loopBadge.hidden = !name;
