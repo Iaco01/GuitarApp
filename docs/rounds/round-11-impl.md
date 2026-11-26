@@ -53,3 +53,25 @@ Oggi i tic ripartono da ogni inizio accordo, quindi il clic "balla" e il numero 
   - tagli;
   - le decisioni, riportate anche in `docs/DECISIONS.md`;
   - una risposta finale di 15 righe al massimo.
+
+## Aggiunta dell'utente (durante il round): fine del Verse 1 e Chorus 1 sul reale
+
+L'utente segnala che alla fine del Verse 1 (gli ultimi 5 accordi D Em C D G, eventi 30–34) la sincronizzazione "si perde" e il Chorus 1 risulta sfalsato. Ecco l'analisi del coordinatore sul round 10 (app e Node danno gli stessi tempi). Il croma e il basso sono stati misurati in modo indipendente, con un passo di 0,3 s.
+
+| evento | motore | audio (stima del coordinatore) |
+|---|---|---|
+| 30 D | 49,64 | ~49,9 (basso F#) |
+| 31 Em | 50,57 | ~50,7–51,4 |
+| 32 C | 53,73 | **~53,1–53,2** (0,5–0,6 s in ritardo) |
+| 33 D | 55,19 | ~55,2 ✓ |
+| 34 G | 57,91–**59,30** | 58,0 ✓, ma **il G suona e decade fino a ~63,0** (croma G 0,83–0,95, rms 0,005–0,04) |
+| gap | **59,30–63,46 "fuori dal foglio"** | **non è musica fuori dal foglio**: è il G tenuto + quasi silenzio |
+| 35 G (Chorus) | 63,46 | attacco a ~63,1–63,4 |
+
+Causa principale: il gap neutro assorbe la **coda del G tenuto e il silenzio**. In play, a 59,3 l'evidenziazione sparisce e compare "Fuori dal foglio" mentre si sente ancora il G; l'utente percepisce una perdita di sincronizzazione e il Chorus come sfalsato.
+
+Da fare (priorità subito dopo i tic):
+1. **Un gap non può essere coda o silenzio.** Se nel tratto del gap il croma somiglia di più all'accordo precedente che agli altri accordi del foglio, oppure l'energia è bassa (coda, pausa), il tratto si attacca all'accordo precedente, che dura di più, e il gap sparisce. Resta gap solo la musica con contenuto armonico diverso e con energia (assolo, ripetizione). Vale per tutti i gap, anche ≥ 3 s. Controlla gli altri gap del reale dei round 8–10.
+2. **Primo accordo dopo una pausa lunga** (attacco del Chorus): cerca l'attacco vero (flusso spettrale) in una finestra di ±0,5 s, non solo il cambio di croma.
+3. **C in ritardo nel tempo libero** (evento 32): il basso arriva tardi (basso C solo da ~54,4), ma il croma C è già netto a ~53,1–53,8. Nel raffinamento del tempo libero, quando il basso è tardivo e il croma pieno del nuovo accordo è netto prima, usa l'attacco più vicino al croma.
+4. Test sul reale (si salta senza la fixture): nessun gap tra Verse 1 e Chorus 1; l'evento 34 finisce dopo 62,5 s; l'evento 32 entro 53,0–53,5 s; l'evento 35 entro 62,9–63,6 s. Riporta la tabella prima/dopo di questi eventi e il controllo indipendente locale per sezione.
