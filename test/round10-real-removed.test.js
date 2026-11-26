@@ -5,9 +5,9 @@ import assert from 'node:assert/strict';
 import { alignmentRecognised } from '../src/alignment.js';
 import { realSkip, loadReal, withoutSections, wrongGreens, sisterSections } from './fixtures/real-helper.mjs';
 
-test('REAL song, whole: unchanged (no section skipped, colours as in round 9, one gap)', { skip: realSkip }, () => {
+test('REAL song, whole: unchanged (no section skipped, colours as in round 9 but the last free-tempo section, yellow with the new threshold, one gap)', { skip: realSkip }, () => {
   const real = loadReal();
-  assert.equal(real.whole.st.map((s) => s[0]).join(''), 'rgygygygggrr');
+  assert.equal(real.whole.st.map((s) => s[0]).join(''), 'rgygygygggry');
   assert.equal(real.whole.res.skipped.filter(Boolean).length, 0);
   assert.equal(real.whole.res.gaps.length, 1);
   assert.ok(alignmentRecognised(real.whole.al, real.song));
