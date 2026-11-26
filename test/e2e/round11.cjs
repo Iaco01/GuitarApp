@@ -12,9 +12,10 @@ const SONG = path.join(OUT, 'synth', 'r10-song.json');
 const MP3 = path.join(OUT, 'synth', 'r10.mp3');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const mode = process.argv[2] || 'all';
-const dev = process.argv[3] || 'SE';
+let dev = process.argv[3] || 'SE';
 const PROFILES = { SE: devices['iPhone SE (3rd gen)'] || { ...devices['iPhone SE'], viewport: { width: 375, height: 667 } }, 13: devices['iPhone 13'], 320: { viewport: { width: 320, height: 568 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true } };
 let fails = 0;
+let dev0 = dev; // eslint-disable-line no-unused-vars
 const rec = (id, ok, info = '') => { if (!ok) fails++; console.log(`${ok ? 'PASS' : 'FAIL'} [${dev}] ${id} ${info}`); };
 async function open() {
   const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
@@ -41,7 +42,31 @@ const heads = (page) => page.evaluate(() => ({ heads: document.querySelectorAll(
 const times = (page) => page.evaluate(() => JSON.parse(localStorage.getItem('gapp.song.' + decodeURIComponent(location.hash.split('/').pop()))).audio.alignment.eventStartSec.slice());
 async function touch(cdp, type, x, y) { await cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y }] }); }
 
+async function corr320() {
+  const REAL = path.join(ROOT, 'test', 'fixtures', 'local', 'american-pie.mht');
+  const REALMP3 = path.join(ROOT, 'test', 'fixtures', 'local', 'american-pie.mp3');
+  if (!fs.existsSync(REALMP3)) { console.log('real mp3 absent: skip'); return; }
+  for (const d of ['320', 'SE']) {
+    dev = d + '-corr';
+    const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
+    const page = await (await browser.newContext(PROFILES[d])).newPage();
+    await page.goto(URL);
+    await page.setInputFiles('#import-input', REAL);
+    await page.waitForSelector('#btn-play', { timeout: 20000 });
+    await page.click('#btn-sync'); await page.waitForSelector('#sync-file', { state: 'attached' });
+    await page.setInputFiles('#sync-file', REALMP3); await page.waitForSelector('#as-start'); await page.click('#as-start');
+    await page.waitForSelector('#as-rows', { timeout: 240000 });
+    await page.click('.as-row[data-sec="0"] [data-act="correct"]');
+    await page.waitForSelector('#corr-tap');
+    await sleep(500);
+    const v = await page.evaluate(() => { const t = document.getElementById('corr-tap').getBoundingClientRect(); const f = document.getElementById('corr-foot').getBoundingClientRect(); return { tapTop: t.top, tapBottom: t.bottom, footTop: f.top, vh: window.innerHeight, n: document.querySelectorAll('.corr-chip').length }; });
+    rec('C1 «Cambio!» is entirely above the fixed bar from the first instant (35 chords)', v.n === 35 && v.tapBottom <= v.footTop + 0.5 && v.tapTop >= 0, JSON.stringify(v));
+    await browser.close();
+  }
+}
+
 async function main() {
+  if (mode === 'corr') { await corr320(); console.log(fails ? `FAILED ${fails}` : 'ALL PASS'); process.exit(fails ? 1 : 0); }
   const { browser, page, errors, cdp } = await open();
   await loadSynthAndSync(page);
   if (mode === 'btn' || mode === 'all') {

@@ -42,3 +42,10 @@ export function gapLabel(startSec, endSec) {
   const what = len < AS_GAP_LONG_SEC ? `passaggio non scritto nel foglio (${Math.round(len)} s)` : 'parte non presente nel foglio';
   return `${clock(startSec)}–${clock(endSec)}: ${what}`;
 }
+
+// A section that is "non presente" while others have exactly the same chords: the audio cannot say which of them is the
+// missing one (they sound alike), so the app may have picked the wrong one.
+export function skippedSisterNote(sectionName) {
+  const verse = /^\s*(verse|strofa|couplet)/i.test(sectionName || '');
+  return `${verse ? 'una delle strofe manca' : 'una delle sezioni uguali manca'}: se è un’altra, usa ⇄ o Correggi a orecchio`;
+}

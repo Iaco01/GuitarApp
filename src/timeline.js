@@ -124,10 +124,12 @@ function buildAlignedTimeline(song, alignment, anchors, bpms, perBar) {
   const lastPresent = presentIdx.length ? presentIdx[presentIdx.length - 1] : -1;
   const endOf = (j) => (j === lastPresent ? Math.max(starts[j] + 1e-3, Math.min(ends[j], musicEnd)) : ends[j]);
   // does music that is not in the sheet (or the end) follow chord j?
+  const nextPresent = new Int32Array(starts.length).fill(-1);
+  for (let q = presentIdx.length - 2; q >= 0; q--) nextPresent[presentIdx[q]] = presentIdx[q + 1];
   const stopsAfter = (j) => {
     if (j === lastPresent) return true;
-    const nx = presentIdx.find((i) => i > j);
-    return nx === undefined || starts[nx] - endOf(j) > 1e-3;
+    const nx = nextPresent[j];
+    return nx < 0 || starts[nx] - endOf(j) > 1e-3;
   };
   // tempo that counts the quarters of a section: the measured one; a free-tempo section (none) takes the one of the nearest
   // section that has it, else the saved one
@@ -229,8 +231,9 @@ function buildAlignedTimeline(song, alignment, anchors, bpms, perBar) {
       });
     });
     const count = beatCursor - startBeat;
-    const firstP = Array.from({ length: k - first }, (_, i) => first + i).find((i) => !skippedSet.has(i));
-    const lastP = Array.from({ length: k - first }, (_, i) => k - 1 - i).find((i) => !skippedSet.has(i));
+    let firstP;
+    let lastP;
+    for (let i = first; i < k; i++) if (!skippedSet.has(i)) { if (firstP === undefined) firstP = i; lastP = i; }
     const secStart = present ? starts[firstP] : prevEnd;
     const secEnd = present ? endOf(lastP) : prevEnd;
     prevEnd = secEnd;

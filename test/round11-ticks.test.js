@@ -136,3 +136,10 @@ test('nudges never put ticks closer than 0.6 beat, the grid stays where the musi
   assert.equal(a.gaps.length, 0, 'under 3 s it is not a gap any more');
   check();
 });
+
+import { skippedSisterNote, sectionWhy } from '../src/syncwords.js';
+test('words: the note for a skipped section among equal ones, the reason for a cut section', () => {
+  assert.equal(skippedSisterNote('Verse 3'), 'una delle strofe manca: se è un’altra, usa ⇄ o Correggi a orecchio');
+  assert.match(skippedSisterNote('Chorus'), /^una delle sezioni uguali manca: se è un’altra/);
+  assert.match(sectionWhy({ bpm: 100, why: 'cut' }, 'yellow'), /tagliata/);
+});

@@ -10,7 +10,7 @@ import { eventRefs, sectionState, sectionEventIndices, alignmentFits, alignmentR
 import { formatClock } from '../audiosync.js';
 import { alignedEventBeats } from '../timeline.js';
 import { formatBpm } from '../render.js';
-import { AS_STATE_TEXT, AS_FREE_TEXT, AS_GAP_NOTE, AS_MANY_MISSING, sectionWhy, gapLabel } from '../syncwords.js';
+import { AS_STATE_TEXT, AS_FREE_TEXT, AS_GAP_NOTE, AS_MANY_MISSING, sectionWhy, gapLabel, skippedSisterNote } from '../syncwords.js';
 
 const AS_SHIFT_MS = [-100, -50, 50, 100];
 const AS_LEAD_SEC = 2;
@@ -55,7 +55,7 @@ export function createAutoSyncPanel({ song, getBlob, getPlayer, timelineWith, pe
     const blob = getBlob();
     if (!blob || running) return;
     const old = getAlign();
-    if (old && countVerified(old) > 0 && !window.confirm(`Rifacendo la sincronizzazione perdi le ${countVerified(old)} sezioni verificate a orecchio. Continuare?`)) return;
+    if (old && countVerified(old) > 0 && !window.confirm(countVerified(old) === 1 ? 'Rifacendo la sincronizzazione perdi la sezione verificata a orecchio. Continuare?' : `Rifacendo la sincronizzazione perdi le ${countVerified(old)} sezioni verificate a orecchio. Continuare?`)) return;
     const p = getPlayer();
     if (p) p.pause();
     running = true;
@@ -158,9 +158,13 @@ export function createAutoSyncPanel({ song, getBlob, getPlayer, timelineWith, pe
       const st = sectionState(a, si);
       counts[st]++;
       if (st === 'skipped') {
+        const key = (k) => idx[k].map((j) => refs[j].name).join('|');
+        const hasSisters = idx[si].length >= 4 && song.sections.some((_, k) => k !== si && idx[k].length && key(k) === key(si));
         rows.append(domEl('li', { class: 'as-row as-skipped', 'data-sec': si, 'data-state': st },
           domEl('span', { class: 'as-dot', 'aria-hidden': 'true' }),
-          domEl('div', { class: 'as-info' }, domEl('div', { class: 'as-top' }, domEl('span', { class: 'as-name' }, `${secName(si)}: non presente nell’audio`)))));
+          domEl('div', { class: 'as-info' },
+            domEl('div', { class: 'as-top' }, domEl('span', { class: 'as-name' }, `${secName(si)}: non presente nell’audio`)),
+            hasSisters ? domEl('div', { class: 'as-why as-sister-note' }, skippedSisterNote(secName(si))) : null)));
         return;
       }
       const s = a.sections[si];
@@ -211,7 +215,7 @@ export function createAutoSyncPanel({ song, getBlob, getPlayer, timelineWith, pe
     if (!t.sections.length) return;
     const base = (song.title || 'brano').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'brano';
     asDownload(`correzioni-${base}.json`, JSON.stringify(t, null, 1));
-    setMsg(`Esportate ${t.sections.length} sezioni verificate (solo tempi e nomi degli accordi).`);
+    setMsg(`${t.sections.length === 1 ? 'Esportata 1 sezione verificata' : `Esportate ${t.sections.length} sezioni verificate`} (solo tempi e nomi degli accordi).`);
   }
 
   function refresh() {
@@ -260,7 +264,7 @@ export function createAutoSyncPanel({ song, getBlob, getPlayer, timelineWith, pe
     const c = sum.counts;
     el.append(
       domEl('p', { class: 'as-counts', id: 'as-counts' },
-        `${c.green} sicure · ${c.yellow} da controllare · ${c.red} incerte · ${c.verified} verificate a orecchio${c.skipped ? ` · ${c.skipped} non presenti nell’audio` : ''}`),
+        `${c.green} ${c.green === 1 ? 'sicura' : 'sicure'} · ${c.yellow} da controllare · ${c.red} ${c.red === 1 ? 'incerta' : 'incerte'} · ${c.verified} ${c.verified === 1 ? 'verificata' : 'verificate'} a orecchio${c.skipped ? ` · ${c.skipped} ${c.skipped === 1 ? 'non presente' : 'non presenti'} nell’audio` : ''}`),
       domEl('p', { class: 'muted small' }, 'Verde: sicura. Giallo: da controllare. Rosso: incerta. Verde scuro: verificata a orecchio. Tempo libero: il brano non ha un battito fisso e i cambi sono stimati. Il colore indica quanto l’app si fida, non quanto è giusta.'));
     if (stats) el.append(domEl('p', { class: 'muted small', id: 'as-stats' }, `Calcolo: decodifica ${(stats.decodeMs / 1000).toFixed(1)} s, analisi ${(stats.analyseMs / 1000).toFixed(1)} s.`));
     if (a.transposeFound !== 0) {

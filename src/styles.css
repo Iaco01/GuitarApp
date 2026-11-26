@@ -448,7 +448,7 @@ h1, h2, h3, p, ul, ol, dl, dd { margin: 0; }
 .corr-chip.now { background: var(--cc, var(--accent)); color: var(--bg); }
 .corr-status { font: 600 15px var(--ui); min-height: 22px; }
 .corr-status.error { color: var(--danger); }
-.corr-tap { min-height: 28vh; font: 800 40px var(--ui) !important; touch-action: manipulation; user-select: none; -webkit-user-select: none; flex: 1 0 auto; }
+.corr-tap { min-height: min(28vh, 150px); position: sticky; bottom: calc(var(--corr-bar-h, 90px) + 8px); z-index: 3; font: 800 40px var(--ui) !important; touch-action: manipulation; user-select: none; -webkit-user-select: none; flex: 1 0 auto; }
 .corr-react { display: flex; align-items: center; gap: 8px; }
 .corr-react .btn { min-width: 44px; min-height: 44px; }
 .corr-react-val { font: 700 16px var(--mono); min-width: 64px; text-align: center; }

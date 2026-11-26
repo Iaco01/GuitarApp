@@ -242,27 +242,37 @@ function* viterbi({ cumE, cumG, cumG0 = null, cumGT = null, T, chordOf, N, strid
     for (let u = lo[j]; u <= Math.min(U, hi[j]); u++) {
       let best = -Infinity;
       let arg = -1;
+      const dEnd = Math.min(dhi, u);
       // an event cut by the end of the audio may be shorter than any chord lasts (and costs nothing for it): the recording stops
       // inside the chord
-      const truncated = u >= U - TRUNC_UNITS;
-      const dFrom = truncated ? 1 : dlo;
-      const dEnd = Math.min(dhi, u);
+      const dFrom = u >= U - TRUNC_UNITS ? 1 : dlo;
       if (base >= 0) {
         // (the hot loop of the whole analysis: the cumulative index moves by one stride per step)
         const eu = cumE[base + u * stride];
-        let ci = base + (u - dFrom) * stride;
-        for (let d = dFrom; d <= dEnd; d++, ci -= stride) {
+        let ci = base + (u - dlo) * stride;
+        for (let d = dlo; d <= dEnd; d++, ci -= stride) {
           const fp = from[u - d];
           if (fp === -Infinity) continue;
-          const v = fp + (eu - cumE[ci]) - (d < dlo ? 0 : pen[d - dlo]);
+          const v = fp + (eu - cumE[ci]) - pen[d - dlo];
+          if (v > best) { best = v; arg = d; }
+        }
+        for (let d = dFrom; d < dlo && d <= dEnd; d++) {
+          const fp = from[u - d];
+          if (fp === -Infinity) continue;
+          const v = fp + (eu - cumE[base + (u - d) * stride]);
           if (v > best) { best = v; arg = d; }
         }
       } else {
-        for (let d = dFrom; d <= dEnd; d++) {
+        for (let d = dlo; d <= dEnd; d++) {
           const fp = from[u - d];
           if (fp === -Infinity) continue;
-          const v = fp - (d < dlo ? 0 : pen[d - dlo]);
+          const v = fp - pen[d - dlo];
           if (v > best) { best = v; arg = d; }
+        }
+        for (let d = dFrom; d < dlo && d <= dEnd; d++) {
+          const fp = from[u - d];
+          if (fp === -Infinity) continue;
+          if (fp > best) { best = fp; arg = d; }
         }
       }
       if (arg >= 0) {
