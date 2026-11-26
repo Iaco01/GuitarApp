@@ -6,8 +6,6 @@ import { formatClock } from '../audiosync.js';
 import { nudgeEvent, nudgeSection, snapshotTimes, restoreTimes } from '../alignment.js';
 
 const NUDGE_STEPS = [-0.25, -0.05, 0.05, 0.25];
-// a click or release in this time after the sheet opens is the end of the long press that opened it: ignored
-const NUDGE_RELEASE_GUARD_MS = 320;
 const NUDGE_LISTEN_LEAD = 2;
 const NUDGE_LISTEN_TAIL = 2;
 
@@ -15,7 +13,8 @@ const fmtStep = (d) => `${d > 0 ? '+' : '−'}${String(Math.abs(d)).replace('.',
 
 // kind 'event': index = chord index (reading order); 'section': index = section index.
 // getPlayer(): the audio player (or null); onChange(): called after every change (the caller saves and redraws).
-export function openNudgeSheet({ song, kind, index, name, getPlayer, onChange }) {
+// holdPointerId: the pointer of the long press that opens the sheet, still down (null when it opens from a tap or a key).
+export function openNudgeSheet({ song, kind, index, name, getPlayer, onChange, holdPointerId = null }) {
   const alignment = song.audio && song.audio.alignment;
   if (!alignment) return;
   const undo = [];
@@ -72,11 +71,17 @@ export function openNudgeSheet({ song, kind, index, name, getPlayer, onChange })
       ...[['Solo questo accordo', false], ['Questo e i seguenti della sezione', true]].map(([label, val]) => domEl('label', { class: 'nudge-opt' },
         domEl('input', { type: 'radio', name: 'nudge-scope', value: val ? 'following' : 'one', checked: val === following, onchange: () => { following = val; } }), ' ' + label)))
     : null;
-  // the finger that opened the sheet (a long press) is still down: its release must not press what appears under it
-  const openedAt = performance.now();
-  const swallowEarly = (e) => {
-    if (performance.now() - openedAt < NUDGE_RELEASE_GUARD_MS) { e.preventDefault(); e.stopPropagation(); }
+  // The finger that opened the sheet (a long press) is still down, however long it stays: what it releases (pointerup, and the mouse and
+  // touch events and the click that follow it) must not press what appears under it. This holds until the next gesture starts (a
+  // pointerdown or touchstart): from then on every tap works at once.
+  let holding = holdPointerId !== null && holdPointerId !== undefined;
+  const swallowRelease = (e) => {
+    if (!holding) return;
+    if (e.type === 'click' && e.detail === 0) return; // a key press on a focused button
+    e.preventDefault();
+    e.stopPropagation();
   };
+  const newGesture = () => { holding = false; };
   const overlay = domEl('div', { class: 'sheet', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Ritocco di ' + name },
     domEl('div', { class: 'sheet-card dlg nudge-sheet' },
       domEl('h2', { class: 'dlg-title' }, kind === 'event' ? 'Sposta accordo' : 'Sposta sezione'),
@@ -90,7 +95,8 @@ export function openNudgeSheet({ song, kind, index, name, getPlayer, onChange })
         domEl('button', { type: 'button', class: 'btn', id: 'nudge-listen', onclick: listen }, 'Ascolta da qui'),
         undoBtn,
         domEl('button', { type: 'button', class: 'btn primary', id: 'nudge-close', onclick: close }, 'Chiudi'))));
-  for (const ev of ['click', 'pointerup', 'mouseup', 'touchend']) overlay.addEventListener(ev, swallowEarly, true);
+  for (const ev of ['click', 'pointerup', 'pointercancel', 'mouseup', 'touchend']) overlay.addEventListener(ev, swallowRelease, true);
+  for (const ev of ['pointerdown', 'touchstart']) overlay.addEventListener(ev, newGesture, true);
   paint();
   document.addEventListener('keydown', onKey);
   document.body.append(overlay);

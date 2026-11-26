@@ -377,6 +377,22 @@ export function createAudioPlayer({ timeline, blob, latencyMs = 0, onFrame, onSt
     // resolves when the scan of the file is done (true: exact seeking is on)
     ready: () => scanReady,
     isExact: () => !!exact,
+    // The element as the tests and the old scripts see it: `currentTime` is the media position of the file (what the player means by
+    // it) and setting it makes an exact jump; everything else is the element's.
+    elementView() {
+      return new Proxy(el, {
+        get(target, prop) {
+          if (prop === 'currentTime') return mediaPos();
+          if (prop === 'duration') return api.duration();
+          const v = Reflect.get(target, prop, target);
+          return typeof v === 'function' ? v.bind(target) : v;
+        },
+        set(target, prop, value) {
+          if (prop === 'currentTime') { api.seek(Number(value) - latency); return true; }
+          return Reflect.set(target, prop, value, target);
+        },
+      });
+    },
     // media position (file timeline, without the latency) and the facts that go to the exported diagnostics
     mediaTime: mediaPos,
     diagnostics: () => ({

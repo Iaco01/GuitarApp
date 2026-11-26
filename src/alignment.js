@@ -479,7 +479,51 @@ export function nudgeSection(alignment, song, si, deltaSec, { anchors = null } =
   const sk = new Set(alignment.skipped || []);
   const list = (sectionEventIndices(song)[si] || []).filter((k) => !sk.has(k));
   if (!list.length) return { ok: false, reason: 'La sezione non è nell’audio', applied: 0 };
+  // a section with an anchor: the sections around it are stretched to meet the anchors, so a plain move would also move their chords a
+  // little; the times are corrected so that only the chords of this section move (round 12)
+  const anchored = !!anchors && si > 0 && Number.isFinite(anchors[si]);
+  const before = anchored ? effectiveEventTimes(song, alignment, anchors) : null;
+  const old = anchored ? alignment.eventStartSec.slice() : null;
   const r = shiftEvents(alignment, list, deltaSec);
-  if (r.ok) { touch(alignment, song, si); followAnchor(anchors, alignment, song, si, list, r.applied); }
+  if (r.ok) {
+    touch(alignment, song, si);
+    followAnchor(anchors, alignment, song, si, list, r.applied);
+    if (anchored) keepNeighbours(alignment, song, si, anchors, before, old, list);
+  }
   return r;
+}
+
+// After the nudge of an anchored section: sets the alignment times of its chords so that the stretched (effective) times of the other
+// sections do not change and those of this section move exactly as asked. Gives up (leaving the plain move) if the result would not
+// keep the order of the chords.
+function keepNeighbours(alignment, song, si, anchors, before, old, list) {
+  const shift = alignment.shiftSec || 0;
+  const skipped = new Set(alignment.skipped || []);
+  const secs = [];
+  sectionEventIndices(song).forEach((l, k) => { if (l.length && !l.every((j) => skipped.has(j))) secs.push({ si: k, i0: l[0], i1: l[l.length - 1] }); });
+  const k = secs.findIndex((m) => m.si === si);
+  if (k <= 0 || k + 1 >= secs.length) return;
+  const t = alignment.eventStartSec;
+  const prev = secs[k - 1];
+  const next = secs[k + 1];
+  const aOld = before.starts[list[0]];
+  const aNew = Number(anchors[si]);
+  if (!Number.isFinite(aNew) || Math.abs(aNew - aOld) < 1e-9) return;
+  const oPrev = t[prev.i0] + shift;
+  const nPrev = before.starts[prev.i0];
+  const oNext = t[next.i0] + shift;
+  const nNext = before.starts[next.i0];
+  const s0Old = old[list[0]] + shift;
+  if (!(s0Old > oPrev) || !(oNext > s0Old)) return;
+  const fPrev = (aOld - nPrev) / (s0Old - oPrev);
+  if (!(fPrev > 0)) return;
+  const s0New = oPrev + (aNew - nPrev) / fPrev;
+  const fOld = (nNext - aOld) / (oNext - s0Old);
+  const fNew = (nNext - aNew) / (oNext - s0New);
+  if (!(fOld > 0) && !(fNew > 0)) return;
+  const nt = list.map((j) => r3(s0New + ((old[j] + shift) - s0Old) * (fOld / fNew) - shift));
+  const ok = nt.every((v, i) => Number.isFinite(v) && (i === 0 || v > nt[i - 1])) && nt[0] > t[prev.i1] && nt[nt.length - 1] < t[next.i0];
+  if (!ok) return;
+  list.forEach((j, i) => { t[j] = nt[i]; });
+  touch(alignment, song, si);
 }

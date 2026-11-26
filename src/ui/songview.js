@@ -213,7 +213,7 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
     });
     if (player !== audioPlayer) metroPlayer.stop();
     player = audioPlayer;
-    gapp.audioEl = audioPlayer.element;
+    gapp.audioEl = audioPlayer.elementView(); // (a view whose currentTime is the media position: for the tests)
     gapp.audioPlayer = audioPlayer; // (for tests: seek, media time, diagnostics)
     startDiagSaver();
     paintOffset();
@@ -414,12 +414,13 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
     if (!ch || !nudgeActive()) return;
     cancelChord();
     chordDown = { x: e.clientX, y: e.clientY };
+    const pointerId = e.pointerId;
     const ref = ch.getAttribute('data-ref');
     chordTimer = setTimeout(() => {
       chordTimer = null;
       const j = timeline.events.findIndex((ev) => ev.ref === ref);
       if (j < 0 || timeline.events[j].skipped) return;
-      openNudgeSheet({ song, kind: 'event', index: j, name: `Accordo ${timeline.events[j].name}`, getPlayer: () => audioPlayer, onChange: () => { persist(); rebuildTimeline(); } });
+      openNudgeSheet({ song, kind: 'event', index: j, name: `Accordo ${timeline.events[j].name}`, getPlayer: () => audioPlayer, holdPointerId: pointerId, onChange: () => { persist(); rebuildTimeline(); } });
     }, LONG_PRESS_MS);
   });
   for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) bodyHolder.addEventListener(ev, cancelChord);
