@@ -23,6 +23,7 @@ export const RECOGNISED_MATCH = 0.12;
 export const NOT_RECOGNISED_RED = 0.75;
 
 const r3 = (v) => Math.round(v * 1000) / 1000;
+const round3dp = r3;
 const r2 = (v) => Math.round(v * 100) / 100;
 
 // Chord events of the song in reading order (the order of the timeline and of the analysis).
@@ -402,7 +403,11 @@ function shiftEvents(alignment, list, deltaSec) {
   const last = present.indexOf(list[list.length - 1]);
   if (first < 0 || last < 0) return { ok: false, reason: 'L’accordo non è nell’audio', applied: 0 };
   const before = first > 0 ? t[present[first - 1]] + NUDGE_MIN_DUR_SEC : 0;
-  const after = last + 1 < present.length ? t[present[last + 1]] - NUDGE_MIN_DUR_SEC : Infinity;
+  let after = last + 1 < present.length ? t[present[last + 1]] - NUDGE_MIN_DUR_SEC : Infinity;
+  // the chord before a stretch of music that is not in the sheet must keep its length up to the start of that stretch
+  const gaps = alignment.gaps || [];
+  const gapAfterLast = gaps.find((g) => g.before - 1 === list[list.length - 1]);
+  if (gapAfterLast) after = Math.min(after, gapAfterLast.startSec - NUDGE_MIN_DUR_SEC);
   let d = deltaSec;
   if (t[list[0]] + d < before) d = before - t[list[0]];
   if (t[list[list.length - 1]] + d > after) d = after - t[list[list.length - 1]];
@@ -410,9 +415,18 @@ function shiftEvents(alignment, list, deltaSec) {
   if (Math.sign(d) !== Math.sign(deltaSec) && d !== 0) d = 0;
   d = Math.round(d * 1000) / 1000;
   if (d === 0) return { ok: false, reason: 'Non c’è spazio per spostare di più', applied: 0 };
+  const moved = new Set(list);
   for (const j of list) t[j] = Math.round((t[j] + d) * 1000) / 1000;
-  // a gap that no longer fits between its two chords is dropped
-  if (alignment.gaps) alignment.gaps = alignment.gaps.filter((g) => g.startSec >= t[g.before - 1] && g.endSec <= t[g.before] + 1e-6);
+  // a stretch of music that is not in the sheet follows the chord after it (it gets shorter or longer) and moves with the one
+  // before it; it disappears only when it falls under the minimum length
+  if (alignment.gaps) {
+    alignment.gaps = alignment.gaps.filter((g) => {
+      const a = g.before - 1;
+      const b = g.before;
+      if (moved.has(b) && moved.has(a)) { g.startSec = round3dp(g.startSec + d); g.endSec = round3dp(g.endSec + d); } else if (moved.has(b)) g.endSec = t[b];
+      return g.endSec - g.startSec >= GAP_MIN_SEC && g.startSec >= t[a] && g.endSec <= t[b] + 1e-6;
+    });
+  }
   if (list[list.length - 1] === t.length - 1) alignment.endSec = Math.max(alignment.endSec + d, t[t.length - 1] + 0.2);
   return { ok: true, applied: d };
 }
@@ -425,8 +439,22 @@ function touch(alignment, song, si) {
   if (j0 !== undefined && !(alignment.skipped || []).includes(j0)) s.startSec = alignment.eventStartSec[j0];
 }
 
+// A manual anchor pins the start of its section: when a nudge moves that start the anchor moves by the same amount (the nudge
+// wins; otherwise the anchor would swallow it). `anchors` ({ section index: sec }) is changed in place.
+function followAnchor(anchors, alignment, song, si, moved, applied) {
+  if (!anchors || si <= 0 || !Number.isFinite(anchors[si])) return;
+  const first = (sectionEventIndices(song)[si] || []).find((k) => !(alignment.skipped || []).includes(k));
+  if (first === undefined || !moved.includes(first)) return;
+  const next = anchors[si] + applied;
+  for (const [k, v] of Object.entries(anchors)) {
+    const i = Number(k);
+    if ((i < si && next <= v + MIN_GAP_SEC) || (i > si && next >= v - MIN_GAP_SEC)) return;
+  }
+  anchors[si] = r3(next);
+}
+
 // Moves chord `j` (index in reading order) by `deltaSec`; with `following` also the chords after it in its section.
-export function nudgeEvent(alignment, song, j, deltaSec, { following = false } = {}) {
+export function nudgeEvent(alignment, song, j, deltaSec, { following = false, anchors = null } = {}) {
   const refs = eventRefs(song);
   if (!refs[j]) return { ok: false, reason: 'Accordo inesistente', applied: 0 };
   const si = refs[j].section;
@@ -435,16 +463,16 @@ export function nudgeEvent(alignment, song, j, deltaSec, { following = false } =
   const list = (following ? idx.filter((k) => k >= j) : [j]).filter((k) => !sk.has(k));
   if (!list.length) return { ok: false, reason: 'L’accordo non è nell’audio', applied: 0 };
   const r = shiftEvents(alignment, list, deltaSec);
-  if (r.ok) touch(alignment, song, si);
+  if (r.ok) { touch(alignment, song, si); followAnchor(anchors, alignment, song, si, list, r.applied); }
   return r;
 }
 
 // Moves the whole section `si` by `deltaSec`.
-export function nudgeSection(alignment, song, si, deltaSec) {
+export function nudgeSection(alignment, song, si, deltaSec, { anchors = null } = {}) {
   const sk = new Set(alignment.skipped || []);
   const list = (sectionEventIndices(song)[si] || []).filter((k) => !sk.has(k));
   if (!list.length) return { ok: false, reason: 'La sezione non è nell’audio', applied: 0 };
   const r = shiftEvents(alignment, list, deltaSec);
-  if (r.ok) touch(alignment, song, si);
+  if (r.ok) { touch(alignment, song, si); followAnchor(anchors, alignment, song, si, list, r.applied); }
   return r;
 }

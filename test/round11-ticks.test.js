@@ -96,3 +96,43 @@ test('synthetic song: the clicks of stable chords fall on the true beats (error 
   // the last chord lasts 8 quarters and the audio has a long tail: the clicks stop when the sound is gone
   assert.equal(tl.events[tl.events.length - 1].beats, 8);
 });
+
+import { createMediaClickCore, LOOP_PREROLL_SEC } from '../src/audiosync.js';
+test('click core: after a seek the beat that sits a few ms behind the landing position is not lost (first click of a loop lap)', () => {
+  const beats = [10, 10.5, 11, 11.5].map((t, index) => ({ index, timeSec: t, isDownbeat: index === 0 }));
+  const core = createMediaClickCore({ beats });
+  core.reset(10.03); // the seek landed 30 ms after the section start
+  const out = core.pull({ ctxNow: 5, mediaNow: 10.03 });
+  assert.deepEqual(out.map((b) => b.index), [0]);
+  assert.ok(LOOP_PREROLL_SEC > 0.03 && LOOP_PREROLL_SEC < 0.2);
+});
+
+import { nudgeEvent, nudgeSection } from '../src/alignment.js';
+test('nudges never put ticks closer than 0.6 beat, the grid stays where the music is, a gap is shortened or lengthened and goes only under 3 s', () => {
+  const song = songOf([['A', ['G', 'D', 'Em', 'C']], ['B', ['Am', 'F']]]);
+  const grid = packGrid(Array.from({ length: 60 }, (_, k) => 0.5 + k * 0.6));
+  const a = alignOf(song, [0.6, 3, 5.4, 7.8, 13.8, 16.2], [grid, packGrid(Array.from({ length: 20 }, (_, k) => 13.8 + k * 0.6))], [100, 100], { gaps: [{ before: 4, startSec: 10.2, endSec: 13.8 }] });
+  a.gaps = [{ before: 4, startSec: 10.2, endSec: 13.8 }];
+  const check = () => {
+    const tl = buildTimeline(song, { alignment: a });
+    for (let i = 1; i < tl.beats.length; i++) assert.ok(tl.beats[i].timeSec - tl.beats[i - 1].timeSec >= 0.6 * 0.6 - 1e-9, `ticks ${i}`);
+    for (const e of tl.events) if (e.durSec < 0.2) assert.ok(e.beats <= 1);
+  };
+  check();
+  for (let n = 0; n < 40; n++) {
+    nudgeEvent(a, song, 2, -0.25); // chord 2 earlier and earlier: chord 1 shrinks to 0.1 s
+    check();
+  }
+  assert.equal(a.gaps.length, 1);
+  const g0 = a.gaps[0].endSec - a.gaps[0].startSec;
+  nudgeEvent(a, song, 4, 0.25);
+  assert.ok(Math.abs(a.gaps[0].endSec - a.gaps[0].startSec - (g0 + 0.25)) < 1e-9, 'the gap is lengthened');
+  nudgeEvent(a, song, 4, -0.25);
+  nudgeEvent(a, song, 4, -0.25);
+  assert.ok(Math.abs(a.gaps[0].endSec - a.gaps[0].startSec - (g0 - 0.25)) < 1e-9, 'the gap is shortened');
+  nudgeSection(a, song, 1, -0.25); // the whole section after the gap
+  assert.equal(a.gaps.length, 1);
+  for (let n = 0; n < 4; n++) nudgeSection(a, song, 1, -0.25);
+  assert.equal(a.gaps.length, 0, 'under 3 s it is not a gap any more');
+  check();
+});

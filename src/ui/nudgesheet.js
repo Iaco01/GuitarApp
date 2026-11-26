@@ -35,6 +35,7 @@ export function openNudgeSheet({ song, kind, index, name, getPlayer, onChange })
     const snap = undo.pop();
     if (!snap) return;
     restoreTimes(alignment, snap);
+    if (snap.anchors && song.audio) song.audio.anchors = { ...snap.anchors };
     msg.textContent = 'Ritocco annullato.';
     onChange();
     paint();
@@ -45,7 +46,10 @@ export function openNudgeSheet({ song, kind, index, name, getPlayer, onChange })
   };
   const step = (d) => {
     const snap = snapshotTimes(alignment);
-    const r = kind === 'event' ? nudgeEvent(alignment, song, index, d, { following }) : nudgeSection(alignment, song, index, d);
+    snap.anchors = { ...((song.audio && song.audio.anchors) || {}) };
+    // (the nudge wins over a manual anchor of the section it moves: the anchors are moved with it)
+    const anchors = song.audio && song.audio.anchors ? song.audio.anchors : null;
+    const r = kind === 'event' ? nudgeEvent(alignment, song, index, d, { following, anchors }) : nudgeSection(alignment, song, index, d, { anchors });
     if (!r.ok) { msg.textContent = r.reason; msg.className = 'msg error'; return; }
     undo.push(snap);
     msg.className = 'msg';

@@ -146,8 +146,10 @@ function firstBeatAtOrAfter(beats, sec) {
 export function createMediaClickCore({ beats, lookahead = 0.1, lateTolerance = 0.05 }) {
   let next = 0;
   return {
+    // a beat up to lateTolerance behind the position is still due (a seek lands a few ms after its target: the first beat of a
+    // loop or of a section would be lost otherwise)
     reset(mediaSec) {
-      next = firstBeatAtOrAfter(beats, mediaSec);
+      next = firstBeatAtOrAfter(beats, mediaSec - lateTolerance);
     },
     pull({ ctxNow, mediaNow, rate = 1, limitSec = Infinity }) {
       const out = [];
@@ -164,6 +166,10 @@ export function createMediaClickCore({ beats, lookahead = 0.1, lateTolerance = 0
     nextIndex: () => next,
   };
 }
+
+// A loop restarts this long before the first beat of the section: the seek takes a few tens of ms to land and the first
+// click of every lap must not be lost.
+export const LOOP_PREROLL_SEC = 0.06;
 
 // Where to seek when a looped section has ended: its start, or null while still inside.
 export function loopSeekTarget(sec, section, slack = 0) {

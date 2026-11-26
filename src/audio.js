@@ -10,7 +10,7 @@
 
 import { eventIndexAtTime, beatIndexAtTime } from './timeline.js';
 import { createWakeKeeper } from './player.js';
-import { createMediaClickCore, loopSeekTarget } from './audiosync.js';
+import { createMediaClickCore, loopSeekTarget, LOOP_PREROLL_SEC } from './audiosync.js';
 
 const AUDIO_TICK_MS = 25;
 
@@ -131,7 +131,7 @@ export function createAudioPlayer({ timeline, blob, latencyMs = 0, onFrame, onSt
   function checkLoop() {
     if (loopSection === null || state !== 'playing') return;
     const target = loopSeekTarget(pos(), tl.sections[loopSection]);
-    if (target !== null) seekDisplay(target);
+    if (target !== null) seekDisplay(Math.max(0, target - LOOP_PREROLL_SEC));
   }
 
   function frame() {
@@ -265,7 +265,7 @@ export function createAudioPlayer({ timeline, blob, latencyMs = 0, onFrame, onSt
       const s = tl.sections[sectionIndex];
       if (!s) return;
       const t = pos();
-      if (t < s.startSec || t >= s.endSec) seekDisplay(s.startSec);
+      if (t < s.startSec || t >= s.endSec) seekDisplay(Math.max(0, s.startSec - LOOP_PREROLL_SEC));
       else resetClicks(el.currentTime);
     },
     getLoop: () => loopSection,

@@ -1,11 +1,10 @@
-// Round 10 tester: open defects as node:test `todo` tests (they run and are reported, but do not fail `npm test`).
-// When a defect is fixed its test starts passing: remove `todo` and move it into test/.
+// Round 10 tester defects, fixed in round 11 (nudge: ticks follow, gaps are kept, anchors do not swallow the nudge).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createSong } from '../../src/model.js';
-import { buildTimeline } from '../../src/timeline.js';
-import { makeAlignment, nudgeEvent, nudgeSection, effectiveEventTimes } from '../../src/alignment.js';
-import { audioTimelineOptions } from '../../src/audiosync.js';
+import { createSong } from '../src/model.js';
+import { buildTimeline } from '../src/timeline.js';
+import { makeAlignment, nudgeEvent, nudgeSection, effectiveEventTimes } from '../src/alignment.js';
+import { audioTimelineOptions } from '../src/audiosync.js';
 
 const chord = (name, beats = 4) => ({ name, col: 0, beats });
 function song() {
@@ -34,7 +33,7 @@ test('baseline: a synced chord of 4 quarters has 4 ticks', () => {
   assert.deepEqual(t.events.map((e) => e.beats), [4, 4, 4, 4, 4, 4]);
 });
 
-test('nudge: after a nudge that shortens a chord to the 0,1 s minimum its ticks follow (no 4 ticks in 0,1 s)', { todo: 'bug 1: eventBeats stay stale after nudgeEvent/nudgeSection' }, () => {
+test('nudge: after a nudge that shortens a chord to the 0,1 s minimum its ticks follow (no 4 ticks in 0,1 s)', () => {
   const a = align();
   const r = nudgeEvent(a, song(), 2, -2.35); // chord 2 earlier: chord 1 now lasts 0,1 s
   assert.ok(r.ok);
@@ -44,7 +43,7 @@ test('nudge: after a nudge that shortens a chord to the 0,1 s minimum its ticks 
   assert.ok(e1.beats <= Math.max(1, Math.round((e1.durSec * 100) / 60)), `chord of ${e1.durSec.toFixed(2)} s has ${e1.beats} ticks`);
 });
 
-test('nudge: a chord lengthened by +0,25 keeps ticks at about the section tempo', { todo: 'bug 1b: ticks restretch instead of following the measured tempo' }, () => {
+test('nudge: a chord lengthened by +0,25 keeps ticks at about the section tempo', () => {
   const a = align();
   nudgeEvent(a, song(), 1, 1.2); // chord 0 now lasts 3,6 s, chord 1 shortened to 1,2 s: both still say 4 quarters
   const t = tl(a);
@@ -52,7 +51,7 @@ test('nudge: a chord lengthened by +0,25 keeps ticks at about the section tempo'
   assert.ok(spacing(t.events[1]) >= 0.45, `spacing of the shortened chord ${spacing(t.events[1]).toFixed(3)} s`);
 });
 
-test('nudge: moving the chord after a gap earlier keeps the gap (the 4 s of foreign music)', { todo: 'bug 2: shiftEvents drops the gap when the chord after it moves earlier' }, () => {
+test('nudge: moving the chord after a gap earlier keeps the gap (the 4 s of foreign music)', () => {
   const a = align(true);
   assert.equal(a.gaps.length, 1);
   const r = nudgeEvent(a, song(), 4, -0.05);
@@ -62,23 +61,25 @@ test('nudge: moving the chord after a gap earlier keeps the gap (the 4 s of fore
   assert.equal(gaps.length, 1);
 });
 
-test('nudge: nudging the first section after a gap earlier (nudgeSection) keeps the gap', { todo: 'bug 2b: same, with the whole section' }, () => {
+test('nudge: nudging the first section after a gap earlier (nudgeSection) keeps the gap', () => {
   const a = align(true);
   nudgeSection(a, song(), 1, -0.25);
   assert.equal(a.gaps.length, 1);
 });
 
-test('nudge on an anchored section is not swallowed (the section moves by the requested amount)', { todo: 'bug 6: anchors pin the section start: the nudge is silently ineffective' }, () => {
+test('nudge on an anchored section is not swallowed (the section moves by the requested amount)', () => {
   const a = align();
   const s = song();
-  const before = buildTimeline(s, { alignment: a, anchors: { 1: 9.6 } }).events[4].startSec;
-  const r = nudgeSection(a, s, 1, 0.25);
+  const anchors = { 1: 9.6 };
+  const before = buildTimeline(s, { alignment: a, anchors }).events[4].startSec;
+  const r = nudgeSection(a, s, 1, 0.25, { anchors }); // the anchor of the section moves with it
   assert.ok(r.ok);
-  const after = buildTimeline(s, { alignment: a, anchors: { 1: 9.6 } }).events[4].startSec;
+  assert.equal(anchors[1], 9.85);
+  const after = buildTimeline(s, { alignment: a, anchors }).events[4].startSec;
   assert.ok(Math.abs(after - before - 0.25) < 0.02, `first chord of the anchored section moved ${(after - before).toFixed(3)} s`);
 });
 
-import { normalizeAlignment, snapshotTimes, restoreTimes } from '../../src/alignment.js';
+import { normalizeAlignment, snapshotTimes, restoreTimes } from '../src/alignment.js';
 test('a nudged alignment survives the library JSON round trip and an undo restores it exactly', () => {
   const a = align(true);
   const snap = snapshotTimes(a);

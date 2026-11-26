@@ -686,7 +686,7 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
         countdown: info.countdown,
         event: ev,
         nextEvent,
-        beatsLeft: ev && beat ? ev.startBeat + ev.beats - beat.index : 0,
+        beatsLeft: ev && beat ? Math.max(0, ev.startBeat + ev.beats - beat.index) : 0,
         gap: gap ? { left: gapLeft, label: nextEvent ? evLabel(nextEvent) : '' } : null,
         curLabel: ev ? evLabel(ev) : undefined,
         nextLabel: nextEvent ? evLabel(nextEvent) : undefined,

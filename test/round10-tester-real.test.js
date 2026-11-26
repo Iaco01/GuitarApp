@@ -3,11 +3,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { parseSongFromMht } from '../../src/parser.js';
-import { analyseAndAlign, songEvents } from '../../src/analysis/autosync.js';
-import { makeAlignment, sectionState, alignmentRecognised } from '../../src/alignment.js';
+import { parseSongFromMht } from '../src/parser.js';
+import { analyseAndAlign, songEvents } from '../src/analysis/autosync.js';
+import { makeAlignment, sectionState, alignmentRecognised } from '../src/alignment.js';
 
-const L = new URL('../fixtures/local/', import.meta.url).pathname;
+const L = new URL('./fixtures/local/', import.meta.url).pathname;
 const have = existsSync(L + 'american-pie.mp3') && existsSync(L + 'american-pie.mht');
 const opts = { skip: have ? false : 'no local fixture' };
 let ctx = null;
