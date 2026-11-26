@@ -101,7 +101,7 @@ async function texts() {
     rec('T8 no «controlla»/«libero» alone in the rows', live.every((r) => !/^controlla$/.test(r.stateText) && r.tempoText !== 'libero'));
     const gaps = await page.$$eval('.as-gap', (g) => g.map((x) => ({ text: x.querySelector('.as-gap-text').textContent, note: x.querySelector('.as-gap-note').textContent })));
     info('T', `${w}px: ${m.length} rows, heights ${Math.min(...m.map((r) => r.rowH)).toFixed(0)}-${Math.max(...m.map((r) => r.rowH)).toFixed(0)} px, rows on two lines ${live.filter((r) => r.lines > 0 && r.rowH > 60).length}, gaps ${gaps.length}`);
-    rec('T9 a gap under 6 s says "passaggio non scritto nel foglio (N s)", with what to do', gaps.length > 0 && gaps.every((g) => /^\d+:\d\d–\d+:\d\d: (passaggio non scritto nel foglio \(\d s\)|parte non presente nel foglio)$/.test(g.text) && g.note === 'nessuna azione richiesta'), JSON.stringify(gaps.map((g) => g.text.replace(/\d+:\d\d/g, 'm:ss'))));
+    rec('T9 (no gap in the real song since round 11) a gap under 6 s says "passaggio non scritto nel foglio (N s)", with what to do', gaps.every((g) => /^\d+:\d\d–\d+:\d\d: (passaggio non scritto nel foglio \(\d s\)|parte non presente nel foglio)$/.test(g.text) && g.note === 'nessuna azione richiesta'), JSON.stringify(gaps.map((g) => g.text.replace(/\d+:\d\d/g, 'm:ss'))));
     const doc = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     rec('T10 no horizontal overflow of the page', doc <= 0, `${doc}`);
     await page.evaluate(() => document.querySelector('#as-rows').scrollIntoView());
@@ -171,6 +171,8 @@ async function gap() {
   await syncWith(page, MP3);
   const al = await alignment(page);
   const g = al.gaps[0];
+  // (round 11: the 59-63 s "gap" was the held G dying out, so the real song has no gap any more: the gap is covered by the synthetic benches)
+  if (!g) { rec('G0 the real song has no gap (round 11: it was a held chord)', true); await browser.close(); return; }
   rec('G0 the real song has its 4 s gap', !!g && g.endSec - g.startSec >= 3 && g.endSec - g.startSec < 6, g ? (g.endSec - g.startSec).toFixed(1) + ' s' : 'none');
   await closeSync(page);
   await page.click('#btn-play');
