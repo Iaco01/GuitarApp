@@ -54,3 +54,24 @@ Riporta la tabella prima/dopo.
   - il tempo libero;
   - le decisioni, riportate anche in `docs/DECISIONS.md`;
   - una risposta finale di 15 righe al massimo.
+
+## Aggiunte dell'utente (durante il round)
+
+### A. Metronomo: un tic per quarto anche con la sincronizzazione (prioritario)
+Con un allineamento attivo ogni accordo fa sempre i suoi battiti del foglio (spesso 4), compressi o allargati sulla durata audio. Deve invece esserci un tic per ogni quarto reale: un accordo di 2 quarti fa 2 tic. Dettagli nel messaggio del coordinatore. Usa `alignment.eventBeats` e il BPM misurato. Nelle sezioni a tempo libero usa il tempo delle sezioni vicine.
+
+### B. Correzione fine: spostare un accordo o una sezione un po' avanti o indietro
+Oggi si corregge solo con "Correggi a orecchio", che chiede tutti i tocchi. Serve un ritocco rapido:
+- **Pressione lunga su un accordo** (con l'allineamento attivo) apre un foglio piccolo con:
+  - il nome e il tempo;
+  - i pulsanti −0,25 / −0,05 / +0,05 / +0,25 s;
+  - "Ascolta da qui", che parte 2 s prima e si ferma 2 s dopo;
+  - la scelta di cosa spostare: "Solo questo accordo" (fra i due vicini, con un margine minimo) oppure "Questo e i seguenti della sezione".
+- **Sulla riga di una sezione** (schermata di sincronizzazione) e sulla sua intestazione nel foglio: gli stessi pulsanti spostano l'intera sezione.
+- Ogni ritocco:
+  - si vede subito: evidenziazione e tic seguono il nuovo tempo;
+  - ha "Annulla";
+  - si salva nell'allineamento;
+  - marca la sezione come "ritoccata a mano", con lo stesso peso di "verificata".
+- Le funzioni pure stanno in `src/alignment.js`, con i loro test: mai un ordine dei tempi invertito, nessun accordo più corto di 0,1 s.
+- e2e su SE: sposta un accordo di +0,25 e una sezione di −0,05, controlla i tempi, l'evidenziazione in play, l'annullamento e il reload.
