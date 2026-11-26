@@ -145,6 +145,7 @@ function buildAlignedTimeline(song, alignment, anchors, bpms, perBar) {
   // 1. the ticks of every chord from the grid of its section (stable tempo) or from its own start (free tempo)
   const ticksOf = new Array(refs.length).fill(null);
   const perOf = new Array(refs.length).fill(0);
+  const freeSecs = new Set(); // sections without a stable tempo: one tick per change
   let j0 = 0;
   song.sections.forEach((sec, si) => {
     const list = [];
@@ -180,8 +181,9 @@ function buildAlignedTimeline(song, alignment, anchors, bpms, perBar) {
         ticksOf[j] = ticks[i].map((t, q) => ({ timeSec: t.timeSec, bar: barPosition(t.k, phase, perBar), first: q === 0, accent: barPosition(t.k, phase, perBar) === 0 }));
       });
     } else {
+      freeSecs.add(si);
       const per = 60 / refBpm(si);
-      const ticks = freeTicks(evs, per, perBar);
+      const ticks = freeTicks(evs);
       list.forEach((j, i) => {
         perOf[j] = per;
         ticksOf[j] = ticks[i].map((t, q) => ({ timeSec: t.timeSec, bar: t.bar, first: q === 0, accent: q === 0 }));
@@ -240,7 +242,7 @@ function buildAlignedTimeline(song, alignment, anchors, bpms, perBar) {
     const dur = Math.max(secEnd - secStart, 1e-3);
     // the tempo shown is the measured one (the sync screen shows the same); a free-tempo section has the one of its neighbour
     const bpm = present ? Math.round(refBpm(si) * 10) / 10 : 60 / (count > 0 ? dur / count : 60 / bpms[si]);
-    sections.push({ index: si, startSec: secStart, endSec: secEnd, startBeat, endBeat: beatCursor, bpm, savedBpm: bpms[si], scale: bpms[si] / bpm, spb: 60 / bpm, anchored: !!(anchors && si > 0 && Number.isFinite(anchors[si])), aligned: true, skipped: sec.lines.length > 0 && present === 0 && k > first });
+    sections.push({ index: si, startSec: secStart, endSec: secEnd, startBeat, endBeat: beatCursor, bpm, savedBpm: bpms[si], scale: bpms[si] / bpm, spb: 60 / bpm, anchored: !!(anchors && si > 0 && Number.isFinite(anchors[si])), aligned: true, free: freeSecs.has(si), skipped: sec.lines.length > 0 && present === 0 && k > first });
   });
   return { events, beats, sections, totalBeats: beatCursor, totalSec: endSec, speed: 1, warnings, aligned: true, gaps };
 }

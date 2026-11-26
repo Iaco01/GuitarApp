@@ -42,10 +42,10 @@ test('gridTicks: a chord gets the beats of the grid that fall in it; accent ever
   assert.equal(phase, 2); // two of the three changes are on k = 2 and 6: the downbeat is k = 2 mod 4
 });
 
-test('freeTicks: a tick on every change, more only for a chord of at least two beats, never close to the next change', () => {
-  const t = freeTicks([{ start: 0, end: 0.9 }, { start: 0.9, end: 2.1 }, { start: 2.1, end: 5 }], 0.5, 4);
-  assert.deepEqual(t.map((x) => x.map((y) => Math.round(y.timeSec * 100) / 100)), [[0], [0.9, 1.4], [2.1, 2.6, 3.1, 3.6, 4.1, 4.6]]);
-  assert.deepEqual(t[2].map((y) => y.bar), [0, 1, 2, 3, 0, 1]);
+test('freeTicks (round 12): exactly one accented tick on every change, whatever the length of the chord', () => {
+  const t = freeTicks([{ start: 0, end: 0.9 }, { start: 0.9, end: 2.1 }, { start: 2.1, end: 5 }]);
+  assert.deepEqual(t.map((x) => x.map((y) => Math.round(y.timeSec * 100) / 100)), [[0], [0.9], [2.1]]);
+  assert.deepEqual(t.map((x) => x.map((y) => y.bar)), [[0], [0], [0]]);
   assert.equal(barPosition(5, 1, 4), 0);
 });
 

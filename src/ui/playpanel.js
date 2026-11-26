@@ -233,7 +233,11 @@ export function createPlayPanel(song, { onLoopExit = null, onPlayPause, onStop, 
     // data: { state, countdown, event, nextEvent, beatsLeft, beatInBar, progress, bpm, strum, strumCell, firstColor }
     update(d) {
       cur.classList.toggle('gap', !!d.gap);
-      curGap.hidden = !d.gap;
+      // free tempo (round 12): the line of the bar says what the clicks do
+      const free = !d.gap && !!d.free && d.state !== 'counting';
+      cur.classList.toggle('free', free);
+      curGap.hidden = !d.gap && !free;
+      if (free) curGap.textContent = 'tempo libero: un tic a ogni cambio';
       if (d.gap) {
         curGap.textContent = `Riprende tra ${d.gap.left} s${d.gap.label ? ` con «${d.gap.label}»` : ''}`;
         curName.classList.remove('count');

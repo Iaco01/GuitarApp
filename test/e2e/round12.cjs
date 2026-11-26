@@ -94,6 +94,19 @@ const rec = (id, ok, info = '') => { if (!ok) fails++; console.log(`${ok ? 'PASS
   rec('O6 "Ascolta e regola" plays about 5 s then stops', playing === 'playing' && after === 'paused', `${playing} -> ${after}`);
   const sz = await page.evaluate(() => { const r = document.getElementById('pp-more').getBoundingClientRect(); return [Math.round(r.width), document.documentElement.scrollWidth]; });
   rec('O7 no horizontal overflow with the row open', sz[1] <= (PROFILES[dev].viewport.width), `scrollWidth ${sz[1]}`);
+  // free tempo: one accented tick per change, the panel says so in small print, at the same height as in a stable section
+  await page.evaluate(() => { window.location.hash = window.location.hash; });
+  const secs = await page.evaluate(() => window.__gapp.timeline.sections.map((x) => ({ s: x.startSec, e: x.endSec, free: !!x.free, skipped: !!x.skipped })));
+  const free = secs.find((x) => x.free && !x.skipped && x.e - x.s > 3); const stable = secs.find((x) => !x.free && !x.skipped && x.e - x.s > 3);
+  if (free && stable) {
+    const h = async (t) => { await page.evaluate((tt) => window.__gapp.audioPlayer.playFromTime(tt), t); await sleep(900); return page.evaluate(() => ({ h: Math.round(document.getElementById('playpanel').getBoundingClientRect().height), txt: document.getElementById('pp-gap') && !document.getElementById('pp-gap').hidden ? document.getElementById('pp-gap').textContent : '', vis: (() => { const r = document.getElementById('pp-gap').getBoundingClientRect(); return [Math.round(r.width), Math.round(r.height)]; })() })); };
+    const a = await h(stable.s + 1.5); const b = await h(free.s + 1.5);
+    rec('F1 free-tempo section: the panel says "tempo libero: un tic a ogni cambio"', b.txt === 'tempo libero: un tic a ogni cambio' && a.txt === '' && b.vis[0] >= 40, JSON.stringify([a.txt, b.txt, b.vis]));
+    rec('F2 the panel grows by at most 8 px in a free-tempo section (the line of the bar becomes a line of text)', b.h - a.h >= 0 && b.h - a.h <= 8, `${a.h} vs ${b.h} px`);
+    const ticks = await page.evaluate((f) => { const tl = window.__gapp.timeline; const evs = tl.events.filter((e) => e.sectionIndex === f && !e.skipped); return evs.map((e) => tl.beats.filter((bt) => bt.eventIndex === tl.events.indexOf(e)).length); }, secs.indexOf(free));
+    rec('F3 one tick per chord in the free section', ticks.length > 0 && ticks.every((n) => n === 1), JSON.stringify(ticks));
+    await page.evaluate(() => window.__gapp.audioPlayer.pause());
+  } else console.log('NOTE no free-tempo section in this song: F1-F3 not run');
   // technical information
   await page.waitForTimeout(100);
   await page.evaluate(() => { window.__gapp.audioPlayer.playFromTime(20); });

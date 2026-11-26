@@ -754,6 +754,7 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
         strum,
         strumId: section ? section.strumIndex : null,
         strumCell,
+        free: !!(timeline.sections[secIdx] && timeline.sections[secIdx].free),
       });
     }
     if (gap && lastProgress !== 0) { lastProgress = 0; panel.setProgress(0); }

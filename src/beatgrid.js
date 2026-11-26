@@ -130,15 +130,9 @@ function barPhase(ticks, perBar) {
 
 export const barPosition = (k, phase, perBar) => (((k - phase) % perBar) + perBar) % perBar;
 
-// Ticks of a free-tempo section: one accented tick at every chord start, and, when the chord lasts at least two beats of
-// the nearby tempo (period `per`), more at that period while the last one stays 0.6 of a beat from the next change.
-// `events`: [{ start, end }]. Returns [[{ timeSec, bar }]] per event.
-export function freeTicks(events, per, perBar) {
-  return events.map(({ start, end }) => {
-    const out = [{ timeSec: start, bar: 0 }];
-    if (end - start >= 2 * per - 1e-9) {
-      for (let m = 1; start + m * per <= end - 0.6 * per + 1e-9; m++) out.push({ timeSec: start + m * per, bar: m % perBar });
-    }
-    return out;
-  });
+// Ticks of a free-tempo section: ONE accented tick at every chord start and nothing in between (round 12: ticks at a constant period
+// do not fall on the beats of a passage played freely, so they sounded out of time). `events`: [{ start, end }]. Returns
+// [[{ timeSec, bar }]] per event. (`per` and `perBar` are kept for the callers: they no longer matter here.)
+export function freeTicks(events) {
+  return events.map(({ start }) => [{ timeSec: start, bar: 0 }]);
 }

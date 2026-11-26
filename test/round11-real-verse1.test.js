@@ -15,8 +15,9 @@ test('real song: no gap between Verse 1 and Chorus 1, the held G lasts to the Ch
   assert.ok(t[34] < 59 && whole.res.eventEndSec[34] > 62.5, `event 34 lasts from ${t[34]} to ${whole.res.eventEndSec[34]}`);
   assert.ok(t[32] >= 53.0 && t[32] <= 53.5, `event 32 at ${t[32]}`);
   assert.ok(t[35] >= 62.9 && t[35] <= 63.6, `event 35 at ${t[35]}`);
-  // in play the highlight does not vanish at 59.3 s: no gap in the timeline, and the G still has clicks after 62 s
+  // in play the highlight does not vanish at 59.3 s: no gap in the timeline and the G event lasts until the Chorus (round 12: a free-tempo
+  // section has one tick per change, so there are no clicks in the held G any more)
   const tl = buildTimeline(song, { alignment: whole.al });
   assert.equal(tl.gaps.length, 0);
-  assert.ok(tl.beats.some((b) => b.eventIndex === 34 && b.timeSec > 61));
+  assert.ok(tl.events[34].startSec + tl.events[34].durSec > 62.5);
 });
