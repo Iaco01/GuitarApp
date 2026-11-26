@@ -6,6 +6,8 @@ import { formatClock } from '../audiosync.js';
 import { nudgeEvent, nudgeSection, snapshotTimes, restoreTimes } from '../alignment.js';
 
 const NUDGE_STEPS = [-0.25, -0.05, 0.05, 0.25];
+// a click or release in this time after the sheet opens is the end of the long press that opened it: ignored
+const NUDGE_RELEASE_GUARD_MS = 320;
 const NUDGE_LISTEN_LEAD = 2;
 const NUDGE_LISTEN_TAIL = 2;
 
@@ -70,6 +72,11 @@ export function openNudgeSheet({ song, kind, index, name, getPlayer, onChange })
       ...[['Solo questo accordo', false], ['Questo e i seguenti della sezione', true]].map(([label, val]) => domEl('label', { class: 'nudge-opt' },
         domEl('input', { type: 'radio', name: 'nudge-scope', value: val ? 'following' : 'one', checked: val === following, onchange: () => { following = val; } }), ' ' + label)))
     : null;
+  // the finger that opened the sheet (a long press) is still down: its release must not press what appears under it
+  const openedAt = performance.now();
+  const swallowEarly = (e) => {
+    if (performance.now() - openedAt < NUDGE_RELEASE_GUARD_MS) { e.preventDefault(); e.stopPropagation(); }
+  };
   const overlay = domEl('div', { class: 'sheet', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Ritocco di ' + name },
     domEl('div', { class: 'sheet-card dlg nudge-sheet' },
       domEl('h2', { class: 'dlg-title' }, kind === 'event' ? 'Sposta accordo' : 'Sposta sezione'),
@@ -83,6 +90,7 @@ export function openNudgeSheet({ song, kind, index, name, getPlayer, onChange })
         domEl('button', { type: 'button', class: 'btn', id: 'nudge-listen', onclick: listen }, 'Ascolta da qui'),
         undoBtn,
         domEl('button', { type: 'button', class: 'btn primary', id: 'nudge-close', onclick: close }, 'Chiudi'))));
+  for (const ev of ['click', 'pointerup', 'mouseup', 'touchend']) overlay.addEventListener(ev, swallowEarly, true);
   paint();
   document.addEventListener('keydown', onKey);
   document.body.append(overlay);

@@ -4,12 +4,12 @@ import { domEl, domClear } from './dom.js';
 import { renderSongBody, formatBpm } from '../render.js';
 import { saveSong, deleteSong } from '../storage.js';
 import { buildTimeline } from '../timeline.js';
-import { GAP_MIN_SEC } from '../alignment.js';
+import { GAP_MIN_SEC, alignmentFits } from '../alignment.js';
 import { createPlayer } from '../player.js';
 import { createAudioPlayer } from '../audio.js';
 import { audioTimelineOptions, formatClock } from '../audiosync.js';
 import { audioStoreGet, audioStoreDelete } from '../audiostore.js';
-import { getDevice } from '../storage.js';
+import { getDevice, saveDevice } from '../storage.js';
 import { openSyncScreen } from './syncscreen.js';
 import { openNudgeSheet } from './nudgesheet.js';
 import { openAnchorSheet } from './anchorsheet.js';
@@ -29,6 +29,9 @@ const BPM_MAX = 300;
 const BEATS_MIN = 1;
 const BEATS_MAX = 32;
 const LONG_PRESS_MS = 500;
+// a finger that moves less than this during a long press is still (a real finger never is)
+const LONG_PRESS_SLOP_PX = 12;
+const NUDGE_HINT = 'Tieni premuto un accordo per spostarlo un po’ avanti o indietro';
 const MANUAL_SCROLL_PAUSE_MS = 4000;
 const TRANSPOSE_MAX = 12;
 const LOW_SCREEN_PX = 700;
@@ -173,6 +176,7 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
       useMetronomePlayer();
       rebuildTimeline();
       paintAudioBar();
+      buildBody();
       return;
     }
     const lat = getDevice().latencyMs;
@@ -196,6 +200,19 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
     rebuildTimeline();
     paintAudioBar();
     if (player.getState() === 'stopped') idlePanel();
+    maybeShowNudgeHint();
+  }
+
+  // the first time a synced song is opened: a discreet line, once (per device)
+  function maybeShowNudgeHint() {
+    if (!nudgeActive() || !timeline.aligned) return;
+    try {
+      const dev = getDevice();
+      if (dev.nudgeHintShown) return;
+      saveDevice({ ...dev, nudgeHintShown: true });
+    } catch { return; }
+    showNote(NUDGE_HINT);
+    setTimeout(() => { if (notice.textContent === NUDGE_HINT) { notice.textContent = ''; notice.className = 'msg'; } }, 12000);
   }
 
   // ---- body ----
@@ -331,7 +348,7 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
         }, `⚓ ${formatClock(t)}`));
       }
     }
-    if (nudgeActive() && timeline.sections[si] && !timeline.sections[si].skipped) {
+    if (nudgeActive() && !(timeline.sections[si] && timeline.sections[si].skipped)) {
       head.append(domEl('button', {
         type: 'button', class: 'sec-nudge', 'data-sec': si, 'aria-label': 'Sposta la sezione di poco',
         onclick: () => openNudgeSheet({ song, kind: 'section', index: si, name: sectionNameOf(si) || `Sezione ${si + 1}`, getPlayer: () => audioPlayer, onChange: () => { persist(); rebuildTimeline(); } }),
@@ -343,9 +360,14 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
       if (timer !== null) clearTimeout(timer);
       timer = null;
     };
+    let down = null;
+    head.addEventListener('pointermove', (e) => {
+      if (timer !== null && down && Math.hypot(e.clientX - down.x, e.clientY - down.y) > LONG_PRESS_SLOP_PX) cancel();
+    });
     head.addEventListener('pointerdown', (e) => {
       if (e.target.closest('button')) return;
       cancel();
+      down = { x: e.clientX, y: e.clientY };
       timer = setTimeout(() => {
         timer = null;
         startLoop(si);
@@ -356,13 +378,17 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
   }
 
   // long press on a chord (with the automatic sync): quick fine correction of its time
-  const nudgeActive = () => !editMode && song.audio && song.audio.alignment && player === audioPlayer && !!audioPlayer && !!timeline.aligned;
+  // (available as soon as the song has an alignment that fits the sheet, also while the audio is still loading: the buttons
+  // must be there after the sync and after a reload, not only after the next redraw)
+  const nudgeActive = () => !editMode && !!song.audio && !!song.audio.alignment && audioStatus !== 'missing' && alignmentFits(song.audio.alignment, song);
   let chordTimer = null;
+  let chordDown = null;
   const cancelChord = () => { if (chordTimer !== null) clearTimeout(chordTimer); chordTimer = null; };
   bodyHolder.addEventListener('pointerdown', (e) => {
     const ch = e.target.closest && e.target.closest('.ch[data-ref]');
     if (!ch || !nudgeActive()) return;
     cancelChord();
+    chordDown = { x: e.clientX, y: e.clientY };
     const ref = ch.getAttribute('data-ref');
     chordTimer = setTimeout(() => {
       chordTimer = null;
@@ -371,7 +397,14 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
       openNudgeSheet({ song, kind: 'event', index: j, name: `Accordo ${timeline.events[j].name}`, getPlayer: () => audioPlayer, onChange: () => { persist(); rebuildTimeline(); } });
     }, LONG_PRESS_MS);
   });
-  for (const ev of ['pointerup', 'pointerleave', 'pointercancel', 'pointermove']) bodyHolder.addEventListener(ev, cancelChord);
+  for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) bodyHolder.addEventListener(ev, cancelChord);
+  // the finger is never still: only a real movement (a scroll) cancels the long press
+  bodyHolder.addEventListener('pointermove', (e) => {
+    if (chordTimer === null || !chordDown) return;
+    if (Math.hypot(e.clientX - chordDown.x, e.clientY - chordDown.y) > LONG_PRESS_SLOP_PX) cancelChord();
+  });
+  // no context menu / text selection callout on a chord (iOS shows them after a long press)
+  bodyHolder.addEventListener('contextmenu', (e) => { if (e.target.closest && e.target.closest('.ch')) e.preventDefault(); });
 
   function startLoop(si) {
     if (editMode) return;

@@ -23,7 +23,6 @@ export const RECOGNISED_MATCH = 0.12;
 export const NOT_RECOGNISED_RED = 0.75;
 
 const r3 = (v) => Math.round(v * 1000) / 1000;
-const round3dp = r3;
 const r2 = (v) => Math.round(v * 100) / 100;
 
 // Chord events of the song in reading order (the order of the timeline and of the analysis).
@@ -423,7 +422,7 @@ function shiftEvents(alignment, list, deltaSec) {
     alignment.gaps = alignment.gaps.filter((g) => {
       const a = g.before - 1;
       const b = g.before;
-      if (moved.has(b) && moved.has(a)) { g.startSec = round3dp(g.startSec + d); g.endSec = round3dp(g.endSec + d); } else if (moved.has(b)) g.endSec = t[b];
+      if (moved.has(b) && moved.has(a)) { g.startSec = r3(g.startSec + d); g.endSec = r3(g.endSec + d); } else if (moved.has(b)) g.endSec = t[b];
       return g.endSec - g.startSec >= GAP_MIN_SEC && g.startSec >= t[a] && g.endSec <= t[b] + 1e-6;
     });
   }
