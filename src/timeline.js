@@ -121,17 +121,30 @@ function buildAlignedTimeline(song, alignment, anchors, bpms, perBar) {
   let beatCursor = 0;
   let k = 0;
   let prevEnd = 0;
+  // tempo that counts the quarters of a section: the measured one; a free-tempo section (none) takes the one of the nearest
+  // section that has it, else the saved one. The number of beats of an event is what the audio says, not the sheet's
+  const measured = song.sections.map((_, si) => (alignment.sections[si] && Number.isFinite(alignment.sections[si].bpm) ? alignment.sections[si].bpm : null));
+  const refBpm = (si) => {
+    if (measured[si] !== null) return measured[si];
+    for (let d = 1; d < measured.length; d++) {
+      if (si - d >= 0 && measured[si - d] !== null) return measured[si - d];
+      if (si + d < measured.length && measured[si + d] !== null) return measured[si + d];
+    }
+    return bpms[si];
+  };
   song.sections.forEach((sec, si) => {
     const startBeat = beatCursor;
     const first = k;
+    const ref = refBpm(si);
     let present = 0;
     sec.lines.forEach((line, li) => {
       line.chords.forEach((c, ci) => {
-        const n = Math.max(1, Math.round(Number(c.beats) || 1));
-        const rel = beatCursor - startBeat;
         const start = starts[k];
         const end = ends[k];
         const dur = Math.max(end - start, 1e-3);
+        const eb = alignment.eventBeats ? alignment.eventBeats[k] : null;
+        const n = measured[si] !== null && Number.isFinite(eb) && eb >= 1 ? Math.round(eb) : Math.max(1, Math.round((dur * ref) / 60));
+        const rel = beatCursor - startBeat;
         const spb = dur / n;
         const eventIndex = events.length;
         if (skippedSet.has(k)) {

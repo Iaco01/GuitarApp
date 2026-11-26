@@ -81,7 +81,8 @@ test('aligned timeline: events at the aligned instants, beats evenly spread, hig
   // sections: start/end and measured tempo
   assert.equal(tl.sections[0].startSec, 1);
   assert.equal(tl.sections[0].endSec, 9);
-  assert.ok(Math.abs(tl.sections[0].bpm - (12 * 60) / 8) < 1e-9);
+  // (event 3 has no measured beats: 1.8 s at 98.7 bpm = 3 quarters, not the 2 of the sheet)
+  assert.ok(Math.abs(tl.sections[0].bpm - (13 * 60) / 8) < 1e-9);
   assert.equal(tl.sections[0].savedBpm, 100);
   // not used for the metronome-only timeline (speed != 1) or when it does not fit
   assert.ok(!buildTimeline(s, { speed: 0.8, alignment: a }).aligned);
@@ -176,4 +177,27 @@ test('alignment survives normalizeAudio, library export (stripAudio) and audioTi
   const out = stripAudio(s);
   assert.deepEqual(normalizeAudio(JSON.parse(JSON.stringify(out.audio))).alignment, a);
   assert.equal(normalizeAudio({ fileName: 'x', alignment: { version: 1, eventStartSec: [2, 1] } }).alignment, undefined);
+});
+
+test('aligned timeline: one click per quarter, whatever the beats of the sheet say (round 10)', () => {
+  const s = song();
+  const a = makeAlignment(result(), s);
+  const tl = buildTimeline(s, { speed: 1, alignment: a });
+  // event 2 (Em): sheet 2 beats, measured 2 -> 2 clicks 1.2 s apart (2 quarters in 2.4 s... at 98.7 bpm a quarter is 0.608 s)
+  const cnt = (j) => tl.beats.filter((b) => b.eventIndex === j).length;
+  assert.equal(cnt(2), 2);
+  // section B has a free tempo: event 5 (sheet 8 beats) lasts 4 s = 7 quarters at the tempo of the nearest measured section
+  assert.equal(cnt(5), 7);
+  // a chord of 2 quarters at the measured tempo is exactly 2 beats even if the sheet says 4
+  const s2 = song();
+  s2.sections[0].lines[0].chords[0].beats = 4;
+  const r = result();
+  r.eventBeats = [null, 4, 2, null, 4, 8, null];
+  r.eventStartSec = [1, 2.2, 6, 7.2, 9, 11, 15]; // event 0 lasts 1.2 s = 2 quarters at 98.7 bpm
+  const tl2 = buildTimeline(s2, { speed: 1, alignment: makeAlignment(r, s2) });
+  assert.equal(tl2.beats.filter((b) => b.eventIndex === 0).length, 2);
+  assert.equal(tl2.events[0].beats, 2);
+  // free tempo section (B): clicks use the tempo of the nearest measured section, never several clicks in a short chord
+  const freeCounts = [4, 5].map((j) => tl.beats.filter((b) => b.eventIndex === j).length);
+  assert.ok(freeCounts.every((n) => n >= 1 && n <= Math.round((tl.events[4].durSec * 98.7) / 60) + 8));
 });

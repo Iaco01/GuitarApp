@@ -260,8 +260,57 @@ async function corr() {
   }
 }
 
+
+// ---------------------------------------------------------------- clicks: one click per quarter over the audio (real song)
+async function clicks() {
+  if (!fs.existsSync(MP3)) { console.log('real mp3 absent: skip'); return; }
+  dev = devName + '-clicks';
+  const { browser, page, errors } = await open();
+  await page.addInitScript(() => {
+    window.__clicks = [];
+    const orig = AudioContext.prototype.createOscillator;
+    AudioContext.prototype.createOscillator = function () {
+      const o = orig.call(this);
+      const st = o.start.bind(o);
+      o.start = (when) => { window.__clicks.push({ ctxAt: when, el: window.__gapp && window.__gapp.audioEl ? window.__gapp.audioEl.currentTime : null, now: this.currentTime }); return st(when); };
+      return o;
+    };
+  });
+  await page.reload();
+  await loadReal(page);
+  await syncWith(page, MP3);
+  const al = await alignment(page);
+  await closeSync(page);
+  const tl = await page.evaluate(() => ({ ev: window.__gapp.timeline.events.map((e) => [e.startSec, e.durSec, e.beats, e.sectionIndex, !!e.skipped]), sec: window.__gapp.timeline.sections.map((s) => [s.startSec, s.endSec, s.bpm]) }));
+  // a stable section: the first one with a measured bpm and 30 s
+  const si = al.sections.findIndex((s, i) => s.bpm !== null && tl.sec[i][1] - tl.sec[i][0] >= 30);
+  const bpm = al.sections[si].bpm;
+  await page.click('#btn-play');
+  await page.waitForFunction(() => window.__gapp.player.state === 'playing', null, { timeout: 15000 });
+  if ((await page.getAttribute('#btn-click-icon', 'aria-pressed')) !== 'true') await page.click('#btn-click-icon');
+  const t0 = tl.sec[si][0] + 1;
+  await page.evaluate((t) => { window.__clicks.length = 0; window.__gapp.audioEl.currentTime = t; }, t0);
+  await sleep(31000);
+  const cl = await page.evaluate(() => window.__clicks.map((c) => c.ctxAt));
+  const sp = cl.slice(1).map((t, i) => t - cl[i]).filter((d) => d < 3);
+  const med = sp.sort((a, b) => a - b)[sp.length >> 1];
+  info('C', `section ${si + 1}, measured ${bpm} BPM, ${cl.length} clicks, median spacing ${(med * 1000).toFixed(0)} ms (expected ${(60000 / bpm).toFixed(0)})`);
+  rec('B1 click spacing is one quarter at the section tempo (±5%)', Math.abs(med - 60 / bpm) / (60 / bpm) < 0.05);
+  // per chord: clicks never more than its quarters (+1 for rounding)
+  const first = cl[0];
+  const elAtFirst = await page.evaluate(() => window.__clicks[0].el);
+  const toMedia = (c) => (elAtFirst === null ? c : elAtFirst + (c - first));
+  const evs = tl.ev.filter((e) => e[3] === si);
+  let worst = 0;
+  const per = evs.map((e) => cl.filter((c) => toMedia(c) >= e[0] - 0.15 && toMedia(c) < e[0] + e[1] - 0.15).length);
+  evs.forEach((e, k) => { if (toMedia(cl[cl.length - 1]) > e[0] + e[1] && toMedia(first) < e[0]) worst = Math.max(worst, per[k] - Math.max(1, Math.round((e[1] * bpm) / 60) + 1)); });
+  rec('B2 no chord gets more clicks than its quarters', worst <= 0, `excess ${worst}; chords checked ${per.length}`);
+  rec('Bz no page errors', errors.length === 0, errors.join('|').slice(0, 100));
+  await browser.close();
+}
+
 (async () => {
-  const all = { texts, skip, gap, corr };
+  const all = { texts, skip, gap, corr, clicks };
   const list = mode === 'all' ? Object.keys(all) : [mode];
   for (const m of list) await all[m]();
   console.log(fails ? `${fails} FAIL` : 'ALL PASS');
