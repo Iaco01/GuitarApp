@@ -86,7 +86,7 @@ export function makeAlignment(result, song, createdAt = new Date().toISOString()
         skipped: !!s.skipped,
         // why a section cannot be trusted besides its own tempo: 'sisters' (it lasts differently from the sections with the same
         // chords), 'offgrid' (its changes miss the beats); null otherwise
-        why: s.why === 'sisters' || s.why === 'offgrid' ? s.why : null,
+        why: s.why === 'sisters' || s.why === 'offgrid' || s.why === 'cut' ? s.why : null,
         // continuous grid of beats of a stable-tempo section (see beatgrid.js): the clicks of the metronome sit on it
         grid: normalizeGrid(s.grid),
       };
@@ -136,7 +136,7 @@ export function normalizeAlignment(raw) {
       confidence: s && Number.isFinite(s.confidence) ? Math.min(1, Math.max(0, s.confidence)) : 0,
       verified: !!(s && s.verified),
       skipped: !!(s && s.skipped),
-      why: s && (s.why === 'sisters' || s.why === 'offgrid') ? s.why : null,
+      why: s && (s.why === 'sisters' || s.why === 'offgrid' || s.why === 'cut') ? s.why : null,
       grid: normalizeGrid(s && s.grid),
     })),
     musicEndSec: Number.isFinite(raw.musicEndSec) && raw.musicEndSec > last ? raw.musicEndSec : null,

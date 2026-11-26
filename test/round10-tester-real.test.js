@@ -1,4 +1,4 @@
-// Round 10 tester: open defects on the REAL local song (skipped when test/fixtures/local is absent). Counts only.
+// Round 10 tester defects on the REAL local song, fixed in round 11 (skipped when test/fixtures/local is absent). Counts only.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
@@ -22,7 +22,7 @@ function setup() {
   return ctx;
 }
 
-test('real song, first 60 s removed: only the section that lost its music may be "non presente"', { ...opts, todo: 'bug 3: sections 2 and 3 (present in the audio) are marked skipped, section 1 is only yellow' }, () => {
+test('real song, first 60 s removed: only the section that lost its music may be "non presente"', opts, () => {
   const { X, run, song } = setup();
   const { st } = run(X.subarray(60 * 44100));
   const skipped = st.map((s, i) => (s === 'skipped' ? i : -1)).filter((i) => i >= 0);
@@ -30,7 +30,7 @@ test('real song, first 60 s removed: only the section that lost its music may be
   assert.equal(song.sections.length, st.length);
 });
 
-test('real song cut at 45% (in the middle of a chorus): a green section has its events where the reference has them', { ...opts, todo: 'bug 4: the truncated chorus is green but its 11 present events are 2.7-3.7 s early' }, () => {
+test('real song cut at 45% (in the middle of a chorus): a green section has its events where the reference has them', opts, () => {
   const { X, run, evs, ref } = setup();
   const n = Math.floor(X.length * 0.45);
   const { res, st } = run(X.subarray(0, n));
@@ -42,7 +42,7 @@ test('real song cut at 45% (in the middle of a chorus): a green section has its 
   });
 });
 
-test('real song cut at 20% (1:43 of 8:33) is recognised (the first two sections are in it)', { ...opts, todo: 'bug 5: 20% cut is not recognised: every section red, the tail is not marked absent' }, () => {
+test('real song cut at 20% (1:43 of 8:33) is recognised (the first two sections are in it)', opts, () => {
   const { X, run } = setup();
   const { al, st } = run(X.subarray(0, Math.floor(X.length * 0.2)));
   assert.ok(alignmentRecognised(al, setup().song), `not recognised, colours ${st.map((s) => s[0]).join('')}`);

@@ -16,6 +16,7 @@ export const AS_FREE_TEXT = 'tempo libero';
 const AS_WHY_FREE = 'tempo libero: i cambi sono stimati';
 const AS_WHY_SISTERS = 'dura diversamente dalle sezioni uguali';
 const AS_WHY_OFFGRID = 'i cambi non cadono sui battiti';
+const AS_WHY_CUT = 'sezione tagliata: parte dei cambi manca nell’audio';
 const AS_WHY_WEAK = 'tempi poco netti';
 // a stretch of music that the sheet does not have: a short one is a bar of passage, a long one a part
 export const AS_GAP_LONG_SEC = 6;
@@ -29,6 +30,7 @@ export function sectionWhy(section, state) {
   if (section.bpm === null) return AS_WHY_FREE;
   if (section.why === 'sisters') return AS_WHY_SISTERS;
   if (section.why === 'offgrid') return AS_WHY_OFFGRID;
+  if (section.why === 'cut') return AS_WHY_CUT;
   return AS_WHY_WEAK;
 }
 

@@ -31,6 +31,13 @@ const SKIP_MID = 12;
 const SKIP_GAP_EXTRA = 30;
 // the last events are skipped only when what is left of the audio is shorter than this share of their expected length
 const TAIL_LEFT_FRAC = 0.35;
+// the first events of the sheet may be missing from the audio (it starts late: a recording cut at the beginning): they are skipped
+// like the last ones, at the same cost each, when the first event in the audio starts earlier than this share of the length
+// the skipped ones are expected to have
+const SKIP_HEAD = 8;
+const HEAD_START_FRAC = 0.35;
+// grid units at the end of the audio where an event may be cut short (see viterbi)
+const TRUNC_UNITS = 2;
 const MARGIN_SHIFTS = [0.25, 0.5, 1];
 // inner-loop steps of the Viterbi between two yields (about 5-10 ms of work in Node)
 const VITERBI_SLICE_WORK = 0.2e6;
@@ -153,10 +160,13 @@ function cumulative(a, D, T) {
 // Music that is not in the sheet: where gapBefore[j] is set, event j may start after a gap that
 // follows the end of event j-1 (a neutral emission: it costs `gapStart` once and `gapFrame` per
 // frame; a running maximum keeps this linear in the number of boundaries).
-function* viterbi({ cumE, cumG, cumG0 = null, cumGT = null, T, chordOf, N, stride, lo, hi, dmin, dmax, expected, sigma, lambda, bonus, kappa, gapBefore = null, gapStart = 0, segs = null, tailCost = null, skipGapExtra = SKIP_GAP_EXTRA }) {
+function* viterbi({ cumE, cumG, cumG0 = null, cumGT = null, T, chordOf, N, stride, lo, hi, dmin, dmax, expected, sigma, lambda, bonus, kappa, gapBefore = null, gapStart = 0, segs = null, tailCost = null, headCost = null, skipGapExtra = SKIP_GAP_EXTRA }) {
   const U = Math.floor(T / stride);
   const Tp = T + 1;
   const back = new Int16Array(N * (U + 1)).fill(-1);
+  const hbits = headCost ? new Uint8Array(N * (U + 1)) : null; // the first events (0..j-1) are skipped and event j starts at this boundary
+  const expPrefix = new Float64Array(N + 1);
+  for (let j = 0; j < N; j++) expPrefix[j + 1] = expPrefix[j] + expected[j];
   const gbits = gapBefore ? new Uint8Array(N * (U + 1)) : null; // bit 0: starts after a gap; bit 1: the gap extends the one ending at u-1
   let prev = new Float64Array(U + 1);
   let cur = new Float64Array(U + 1);
@@ -217,27 +227,41 @@ function* viterbi({ cumE, cumG, cumG0 = null, cumGT = null, T, chordOf, N, strid
       }
       from = start;
     }
+    if (headCost && j > 0) {
+      // the audio may start with event j (the ones before it are not in it): a fresh start at a boundary close enough to the
+      // start of the audio, at the cost of skipping them (`from` is a scratch array here: the score row of the event before)
+      for (let u = 0; u <= U; u++) {
+        const frames = u * stride;
+        if (frames > HEAD_START_FRAC * expPrefix[j]) break;
+        const v = kappa * (bonus ? bonus[frames] : 0) + g0[frames] - headCost[j] * j;
+        if (v > from[u]) { from[u] = v; hbits[j * (U + 1) + u] = 1; }
+      }
+    }
     const last = j === N - 1;
     let inner = 0;
     for (let u = lo[j]; u <= Math.min(U, hi[j]); u++) {
       let best = -Infinity;
       let arg = -1;
+      // an event cut by the end of the audio may be shorter than any chord lasts (and costs nothing for it): the recording stops
+      // inside the chord
+      const truncated = u >= U - TRUNC_UNITS;
+      const dFrom = truncated ? 1 : dlo;
       const dEnd = Math.min(dhi, u);
       if (base >= 0) {
         // (the hot loop of the whole analysis: the cumulative index moves by one stride per step)
         const eu = cumE[base + u * stride];
-        let ci = base + (u - dlo) * stride;
-        for (let d = dlo; d <= dEnd; d++, ci -= stride) {
+        let ci = base + (u - dFrom) * stride;
+        for (let d = dFrom; d <= dEnd; d++, ci -= stride) {
           const fp = from[u - d];
           if (fp === -Infinity) continue;
-          const v = fp + (eu - cumE[ci]) - pen[d - dlo];
+          const v = fp + (eu - cumE[ci]) - (d < dlo ? 0 : pen[d - dlo]);
           if (v > best) { best = v; arg = d; }
         }
       } else {
-        for (let d = dlo; d <= dEnd; d++) {
+        for (let d = dFrom; d <= dEnd; d++) {
           const fp = from[u - d];
           if (fp === -Infinity) continue;
-          const v = fp - pen[d - dlo];
+          const v = fp - (d < dlo ? 0 : pen[d - dlo]);
           if (v > best) { best = v; arg = d; }
         }
       }
@@ -317,6 +341,10 @@ function* viterbi({ cumE, cumG, cumG0 = null, cumGT = null, T, chordOf, N, strid
     ends[j] = u;
     u -= back[j * (U + 1) + u];
     starts[j] = u;
+    if (hbits && hbits[j * (U + 1) + u]) {
+      for (let k = 0; k < j; k++) { ends[k] = u; starts[k] = u; skipped[k] = 1; }
+      break;
+    }
     if (gbits && (gbits[j * (U + 1) + u] & 1)) {
       // walk back over the gap: it began right after the end of event j-1
       while (gbits[j * (U + 1) + u] & 2) u--;
@@ -417,6 +445,7 @@ export function* alignEventsSteps(feat, events, options = {}) {
   // sections that can be skipped, and the cost of skipping the last events (null: nothing is skipped)
   let segs = null;
   let tailCost = null;
+  let headCost = null;
   if (options.skips !== false && events.some((e) => e.section !== undefined)) {
     segs = [];
     for (let j = 0; j < N; j++) {
@@ -431,6 +460,7 @@ export function* alignEventsSteps(feat, events, options = {}) {
       j = b;
     }
     tailCost = new Float64Array(N).fill(options.skipTail ?? SKIP_TAIL);
+    headCost = options.skipHead === false ? null : new Float64Array(N).fill(options.skipHead ?? SKIP_HEAD);
   }
   const kappa = options.kappa ?? 0.5;
   const sumPrior = priorBeats.reduce((a, b) => a + b, 0);
@@ -490,7 +520,7 @@ export function* alignEventsSteps(feat, events, options = {}) {
           hi[j] = Math.min(U, Math.ceil(centre + w));
         }
       }
-      const r = yield* viterbi({ cumE, cumG, cumG0, cumGT, T, chordOf: chordSet.chordOf, N, stride, lo, hi, dmin, dmax, expected, sigma: st.sigma, lambda: options.lambda ?? 8, bonus, kappa, gapBefore, gapStart: options.gapStart ?? GAP_START, segs: skipsOn ? segs : null, tailCost: skipsOn ? tailCost : null, skipGapExtra: options.skipGapExtra ?? SKIP_GAP_EXTRA });
+      const r = yield* viterbi({ cumE, cumG, cumG0, cumGT, T, chordOf: chordSet.chordOf, N, stride, lo, hi, dmin, dmax, expected, sigma: st.sigma, lambda: options.lambda ?? 8, bonus, kappa, gapBefore, gapStart: options.gapStart ?? GAP_START, segs: skipsOn ? segs : null, tailCost: skipsOn ? tailCost : null, headCost: skipsOn ? headCost : null, skipGapExtra: options.skipGapExtra ?? SKIP_GAP_EXTRA });
       if (!r) return null;
       res = r;
       strideNow = stride;

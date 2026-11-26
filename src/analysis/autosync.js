@@ -48,7 +48,7 @@ const SKIP_SUSPECT = 2;
 // result with the whole sheet looks poor (see alignEventsSteps: s0Frac) and covering the whole sheet would need a tempo
 // above COVER_MIN_BPM (the beats of the sheet divided by the length of the audio): a recording of the whole song, even a
 // noisy one, does not need these extra runs
-const COVER_TRIES = [0.7, 0.45, 0.28];
+const COVER_TRIES = [0.7, 0.45, 0.28, 0.18, 0.1];
 const COVER_MIN_BPM = 190;
 // share of the sections (not skipped) that must not be red for the result to be called decent
 const DECENT_SHARE = 0.6;
@@ -421,6 +421,16 @@ export function* analyseAndAlignSteps({ samples, sampleRate, song, onProgress = 
       if (f.severe) for (const nb of [si - 1, si + 1]) if (nb >= 0 && nb < sections.length) capSection(nb, COH_CAP_YELLOW, 'sisters');
     });
     sections.forEach((s, si) => { if (s && s.beatGrid && s.offGrid > OFF_GRID_MAX) capSection(si, COH_CAP_YELLOW, 'offgrid'); });
+    // a section the audio starts or stops in the middle of (some of its chords are not in the audio): its length cannot be
+    // compared with its sisters', and the squeezing of the part that is there (the recording ends or starts inside a chord, the
+    // chord sequence repeats) cannot be told from a good fit: never "sicura", and the neighbour that shares the cut is not either
+    secInfo.forEach((m, si) => {
+      if (!m.here.length || m.complete) return;
+      capSection(si, COH_CAP_YELLOW, 'cut');
+      // (the neighbour on the side of the cut: before it when the end of the section is missing, after it when the start is)
+      const nb = m.here[0] === m.all[0] ? si - 1 : si + 1;
+      if (nb >= 0 && nb < sections.length && secInfo[nb].here.length > 0) capSection(nb, COH_CAP_YELLOW, 'cut');
+    });
     // an event that precedes music not in the sheet ends where that music starts
     present.forEach((j, k) => {
       if (k + 1 >= present.length) return;
