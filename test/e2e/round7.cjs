@@ -146,7 +146,7 @@ async function flow(label, profile) {
   await page.waitForSelector(`.as-row[data-sec="${si}"][data-state="verified"]`);
   await shot(page, '7-verified');
   const c2 = await page.innerText('#as-counts');
-  rec('C5 summary counts the verified section', /1 verificate/.test(c2), c2);
+  rec('C5 summary counts the verified section', /1 verificat[ae]/.test(c2), c2);
 
   // export
   const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#as-export')]);

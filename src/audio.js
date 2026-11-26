@@ -68,7 +68,9 @@ export function createAudioPlayer({ timeline, blob, latencyMs = 0, onFrame, onSt
 
   // (while a new source loads the element may still report the position of the old one: the origin is the position)
   const mediaPos = () => originSec + (loading ? 0 : el.currentTime);
-  const pos = () => mediaPos() - latency;
+  // (right after a jump the blob plays its few lead frames before the wanted time: the position shown never goes before the time asked)
+  let floorSec = 0;
+  const pos = () => Math.max(mediaPos(), floorSec) - latency;
 
   const scanReady = (async () => {
     try {
@@ -94,6 +96,7 @@ export function createAudioPlayer({ timeline, blob, latencyMs = 0, onFrame, onSt
   // it carries on from the new place.
   function seekMedia(t) {
     const target = Math.max(0, t);
+    floorSec = target;
     restartDrift();
     const t0 = typeof performance !== 'undefined' ? performance.now() : 0;
     const wasPlaying = state === 'playing';
@@ -263,7 +266,9 @@ export function createAudioPlayer({ timeline, blob, latencyMs = 0, onFrame, onSt
   el.addEventListener('seeked', () => {
     if (state === 'playing') resetClicks(mediaPos());
   });
-  el.addEventListener('loadedmetadata', () => { loading = false; });
+  // (a source that is going to play keeps `loading` until the element really plays: before that its clock is stopped and the clicks
+  // scheduled from it would sound early)
+  el.addEventListener('loadedmetadata', () => { if (el.paused) loading = false; });
   el.addEventListener('playing', () => {
     loading = false;
     if (gapFrom) {
