@@ -79,7 +79,11 @@ Causa: `buildAlignedTimeline` spalmava i battiti del foglio (spesso 4) sulla dur
 ## Test ed e2e
 
 `npm test`: 250/250 (da 222), ~45 s. Test sul reale (tagli ×6, sezioni tolte ×3 + due sezioni, intero) saltati se manca la fixture.
-E2E nuovi (`test/e2e/round10*.{cjs,mjs,sh}`): `round10.cjs texts|skip|gap|corr|clicks|nudge`, `round10-realcut.mjs`, `round10-real.mjs` (confronto evento per evento), `round10-free-bench.mjs`. Regressione dei round 4–9 e dei tester: vedi sotto.
+E2E nuovi (`test/e2e/round10*.{cjs,mjs,sh}`): `round10.cjs texts|skip|gap|corr|clicks|nudge`, `round10-realcut.mjs`, `round10-real.mjs` (confronto evento per evento), `round10-free-bench.mjs`. 
+**Regressione** (`bash test/e2e/round10-regress.sh`, build fresco, round 4–9 e script dei tester, più i nuovi): tutto verde (round4, 5, 6, 7 e tester, 8 e tester, 9 e tester incl. decodifica e prova da utente, `round10.cjs all`: 97 PASS) tranne:
+- `round7-tester-app synth`: 1 FAIL atteso già dal round 9 (C3c, evidenziazione dal vivo nel tempo libero, 275 ms; C6b non eseguibile).
+- `round8 all` / `round8-tester-app sync 320|360`: il controllo "una riga compatta per sezione ≤ 64 px" non vale più per scelta (le righe hanno ora fino a 2 righe di stato e la riga del motivo: 54–78 px a SE, 54–92 px a 320). Gli altri controlli (testo non tagliato, pulsanti ≥ 44 px, "Fatto" in vista) passano; avevano fallito K7/K9 (elenco accordi senza tempo, ora fino a 8 accordi elencati) e S2/S3 per un terzo pulsante che stringeva il nome a 320 px: tolto (il ritocco della sezione si apre toccando il testo della riga).
+- `round9 texts`: verde dopo aver corretto lo stesso problema.
 
 ## Cosa non funziona / limiti
 
