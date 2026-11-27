@@ -19,7 +19,9 @@ export function createPlayPanel(song, { onLoopExit = null, onPlayPause, onStop, 
   const curBar = domEl('div', { class: 'pp-cur-bar' }, domEl('div', { class: 'pp-cur-fill' }));
   // inside music that is not in the sheet: the bar gives way to the countdown to the next chord
   const curGap = domEl('div', { class: 'pp-cur-gap', id: 'pp-gap', hidden: true }, '');
-  const cur = domEl('div', { class: 'pp-cur' }, domEl('div', { class: 'pp-cur-main' }, curDg, curName), curBar, curGap);
+  // free tempo (round 12): what the clicks do, on the line of the bar (its own element: #pp-gap means music that is not in the sheet)
+  const curFree = domEl('div', { class: 'pp-cur-gap pp-cur-free', id: 'pp-free', hidden: true }, 'tempo libero: un tic a ogni cambio');
+  const cur = domEl('div', { class: 'pp-cur' }, domEl('div', { class: 'pp-cur-main' }, curDg, curName), curBar, curGap, curFree);
   const nextName = domEl('span', { class: 'pp-next-name', id: 'pp-next' }, '–');
   const nextDg = domEl('span', { class: 'pp-dg', id: 'pp-next-dg' });
   const nextBadge = domEl('span', { class: 'pp-badge', id: 'pp-left', title: 'Battiti al cambio' }, '');
@@ -236,8 +238,8 @@ export function createPlayPanel(song, { onLoopExit = null, onPlayPause, onStop, 
       // free tempo (round 12): the line of the bar says what the clicks do
       const free = !d.gap && !!d.free && d.state !== 'counting';
       cur.classList.toggle('free', free);
-      curGap.hidden = !d.gap && !free;
-      if (free) curGap.textContent = 'tempo libero: un tic a ogni cambio';
+      curFree.hidden = !free;
+      curGap.hidden = !d.gap;
       if (d.gap) {
         curGap.textContent = `Riprende tra ${d.gap.left} s${d.gap.label ? ` con «${d.gap.label}»` : ''}`;
         curName.classList.remove('count');

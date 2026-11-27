@@ -475,7 +475,7 @@ h1, h2, h3, p, ul, ol, dl, dd { margin: 0; }
 .pp-off-val { font-size: 14px; min-width: 9em; text-align: center; }
 .diag-out { width: 100%; box-sizing: border-box; font: 11px/1.3 monospace; }
 .pp-cur.free .pp-cur-bar { display: none; }
-.pp-cur.free .pp-cur-gap { font-size: 10px; line-height: 12px; }
+.pp-cur-free { font-size: 10px; line-height: 12px; }
 
 /* "Correggi a orecchio" on a short screen (round 12): instructions, chips and «Cambio!» all above the fixed bar, nothing covered */
 @media (max-height: 700px) {
