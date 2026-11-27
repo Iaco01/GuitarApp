@@ -802,7 +802,7 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
     // the rhythm row of the first section is already there when stopped: the panel has the same height in play
     const sec0 = song.sections[first ? first.sectionIndex : 0];
     const strum0 = sec0 && sec0.strumIndex !== null && sec0.strumIndex !== undefined ? song.strumming[sec0.strumIndex] || null : null;
-    panel.update({ state: 'stopped', countdown: 0, event: null, nextEvent: first, nextLabel: first ? evLabel(first) : undefined, beatsLeft: 0, beatInBar: -1, bpm: timeline.sections[0] ? timeline.sections[0].bpm : 80, strum: strum0, strumId: strum0 ? sec0.strumIndex : null, strumCell: -1 });
+    panel.update({ state: 'stopped', countdown: 0, event: null, nextEvent: first, nextLabel: first ? evLabel(first) : undefined, beatsLeft: 0, beatInBar: -1, bpm: timeline.sections[0] ? timeline.sections[0].bpm : 80, strum: strum0, strumId: strum0 ? sec0.strumIndex : null, strumCell: -1, free: !!(first && timeline.sections[first.sectionIndex] && timeline.sections[first.sectionIndex].free) });
   }
 
   panel = createPlayPanel(song, {
