@@ -149,7 +149,7 @@ export function createAudioPlayer({ timeline, blob, latencyMs = 0, onFrame, onSt
   }
 
   // ---- clicks ----
-  function click(whenIn, accent) {
+  function click(whenIn, accent, mediaTime = NaN) {
     const when = Math.max(0, whenIn); // a click a few ms late on a brand new context would be negative
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
@@ -161,7 +161,7 @@ export function createAudioPlayer({ timeline, blob, latencyMs = 0, onFrame, onSt
     gain.connect(ctx.destination);
     osc.start(when);
     osc.stop(when + 0.04);
-    scheduled.push({ osc, gain, when });
+    scheduled.push({ osc, gain, when, mt: mediaTime });
   }
 
   // Cancels the clicks not yet sounded (after a seek, pause or rate change).
@@ -191,7 +191,7 @@ export function createAudioPlayer({ timeline, blob, latencyMs = 0, onFrame, onSt
     const now = ctx.currentTime;
     if (loading) return;
     const due = core.pull({ ctxNow: now, mediaNow: mediaPos(), rate, limitSec: loopSection !== null && tl.sections[loopSection] ? tl.sections[loopSection].endSec : Infinity });
-    for (const b of due) click(b.when, b.accent);
+    for (const b of due) click(b.when, b.accent, b.mediaTime);
     if (scheduled.length > 64) scheduled = scheduled.filter((s) => s.when > now - 0.1);
   }
 
@@ -367,8 +367,12 @@ export function createAudioPlayer({ timeline, blob, latencyMs = 0, onFrame, onSt
       // the beats up to the current position were already heard: restarting from "a beat just behind" (the tolerance of reset)
       // would sound the last one twice
       if (state === 'playing') {
+        // (the media clock is read in steps: a click that already sounded can have a beat time a little ahead of the position)
+        const now = ctx ? ctx.currentTime : 0;
+        let lastHeard = -Infinity;
+        for (const sc of scheduled) if (sc.when <= now && sc.mt > lastHeard) lastHeard = sc.mt;
         cancelClicks();
-        core.reset(mediaPos() + CLICK_LATE_TOLERANCE_SEC);
+        core.reset(Math.max(mediaPos(), lastHeard + 0.001) + CLICK_LATE_TOLERANCE_SEC);
       }
     },
     setLatency(ms) {

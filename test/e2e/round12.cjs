@@ -21,6 +21,7 @@ const rec = (id, ok, info = '') => { if (!ok) fails++; console.log(`${ok ? 'PASS
   page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') console.log('console', m.type(), m.text().slice(0, 200)); });
   page.on('pageerror', (e) => errors.push(String(e)));
   page.on('dialog', (d) => d.accept());
+  await page.addInitScript(() => { try { const d = JSON.parse(localStorage.getItem('gapp.device.v1') || '{}'); d.barAutoCollapse = false; localStorage.setItem('gapp.device.v1', JSON.stringify(d)); } catch (e) { /* round 13: the bar stays open for these older checks */ } });
   await page.goto(URL);
   await page.setInputFiles('#import-json', SONG);
   await page.waitForSelector('.dlg', { timeout: 3000 }).catch(() => {});

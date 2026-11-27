@@ -148,13 +148,13 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
   let listenToken = 0;
   let diagTimer = null;
   // what the player measures goes to the device storage every 10 s, for the exported technical information
+  function saveDiagNow() {
+    if (!audioPlayer) return;
+    try { saveDiag({ songId: song.id, savedAt: new Date().toISOString(), player: audioPlayer.diagnostics() }); } catch { /* no storage */ }
+  }
   function startDiagSaver() {
-    const save = () => {
-      if (!audioPlayer) return;
-      try { saveDiag({ songId: song.id, savedAt: new Date().toISOString(), player: audioPlayer.diagnostics() }); } catch { /* no storage */ }
-    };
-    diagTimer = setInterval(save, 10000);
-    audioPlayer.ready().then(save);
+    diagTimer = setInterval(saveDiagNow, 10000);
+    audioPlayer.ready().then(saveDiagNow);
   }
   function paintOffset() {
     if (!panel) return;
@@ -165,6 +165,7 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
 
   // ---- audio file: load from IndexedDB, switch between metronome and audio ----
   function destroyAudioPlayer() {
+    saveDiagNow(); // (the last seconds: leaving the song or reloading the audio)
     if (diagTimer !== null) clearInterval(diagTimer);
     diagTimer = null;
     if (audioPlayer) audioPlayer.destroy();
@@ -855,7 +856,13 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
       persist();
       // with audio the media time does not depend on the speed: only the playback rate changes
       if (audioPlayer) audioPlayer.setRate(v);
-      rebuildTimeline();
+      if (audioPlayer && player === audioPlayer) {
+        // (the audio timeline does not depend on the speed: rebuilding it would restart the click scheduling and could double a tick)
+        plainTimeline = buildTimeline(song, { speed });
+        metroPlayer.setTimeline(plainTimeline);
+      } else {
+        rebuildTimeline();
+      }
     },
     onOffset: (dir) => {
       if (!audioPlayer) return;

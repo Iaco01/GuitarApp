@@ -24,6 +24,7 @@ async function open() {
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
   page.on('dialog', (d) => d.accept());
+  await page.addInitScript(() => { try { const d = JSON.parse(localStorage.getItem('gapp.device.v1') || '{}'); d.barAutoCollapse = false; localStorage.setItem('gapp.device.v1', JSON.stringify(d)); } catch (e) { /* round 13: the bar stays open for these older checks */ } });
   await page.goto(URL);
   const cdp = await ctx.newCDPSession(page);
   return { browser, page, errors, cdp };

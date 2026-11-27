@@ -151,6 +151,12 @@ const info = (id, t) => console.log(`INFO [${dev}] ${id} ${t}`);
     await page.mouse.move(box.x + 10, box.y + 10); await page.mouse.down(); await sleep(1300); await page.mouse.up();
     rec('T8 long press repeats', Number((await pct()).replace('%', '')) < 60, await pct());
     await page.tap('#btn-speed-100');
+    // no audio: the same control scales the metronome timeline
+    const d100 = await q(() => window.__gapp.timeline.events[0].durSec);
+    await page.tap('#btn-speed-50');
+    const d50 = await q(() => window.__gapp.timeline.events[0].durSec);
+    rec('T9 without audio the 50% doubles the durations of the metronome timeline', Math.abs(d50 / d100 - 2) < 0.01, `${d100.toFixed(3)} -> ${d50.toFixed(3)} s`);
+    await page.tap('#btn-speed-100');
   }
   rec('no page errors', errors.length === 0, errors.slice(0, 2).join(' | '));
   await browser.close();
