@@ -7,3 +7,4 @@ test/fixtures/local/
 *.mhtml
 !test/fixtures/synthetic/*.mht
 .DS_Store
+__pycache__/
