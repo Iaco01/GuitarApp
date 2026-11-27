@@ -18,7 +18,7 @@ import { createPlayPanel } from './playpanel.js';
 import { openRecorder } from './recorder.js';
 import { createTapTempo } from '../taprecord.js';
 import { displayChordName } from '../transpose.js';
-import { openChordSheet, openCapoSheet, renderDiagramRow, smallDiagramSvg } from './chordsheet.js';
+import { openChordSheet, openCapoSheet, renderDiagramRow, renderDiagramColumn, smallDiagramSvg } from './chordsheet.js';
 import { effectiveSectionBpms, groupRepeatedSections, setAllChordBeats, sectionSignature, baseSectionName, insertPause, removePause, hasEditedDurations, applyBpmChange, snapshotBpms, restoreBpms } from '../model.js';
 import { estimateSongDurations } from '../durations.js';
 
@@ -65,7 +65,12 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
   domClear(root);
 
   let editMode = false;
-  let speed = 1;
+  const savedPct = Number(song.view.speedPct);
+  let speed = Number.isFinite(savedPct) ? Math.min(100, Math.max(25, Math.round(savedPct))) / 100 : 1;
+  const devPref = (key, fallback) => { try { const v = getDevice()[key]; return v === undefined ? fallback : v; } catch { return fallback; } };
+  const setDevPref = (key, value) => { try { saveDevice({ ...getDevice(), [key]: value }); } catch { /* no storage: holds for this session */ } };
+  let dgMode = ['side', 'top', 'none'].includes(devPref('diagramMode', 'side')) ? devPref('diagramMode', 'side') : 'side';
+  let barAuto = devPref('barAutoCollapse', true) !== false;
   let metronomeOn = true;
   let panel = null;
   let plainTimeline = buildTimeline(song, { speed });
@@ -542,6 +547,7 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
   };
 
   const buildSettings = () => {
+    const wasOpen = !!(settingsHolder.querySelector('details') && settingsHolder.querySelector('details').open);
     domClear(settingsHolder);
     const input = domEl('input', { type: 'number', inputmode: 'decimal', min: String(BPM_MIN), max: String(BPM_MAX), step: '1', id: 'bpm-input', 'aria-label': 'BPM di partenza', placeholder: '80', value: song.bpm ? String(song.bpm) : '' });
     const saveBpm = () => {
@@ -596,11 +602,26 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
         input,
         domEl('button', { type: 'button', class: 'btn', id: 'bpm-save', onclick: saveBpm }, 'Salva')),
       domEl('div', { class: 'set-row' },
+        domEl('span', null, 'Diagrammi'),
+        domEl('div', { class: 'seg-btns', role: 'group', 'aria-label': 'Posizione dei diagrammi' },
+          [['side', 'Di lato'], ['top', 'In cima'], ['none', 'Nascosti']].map(([m, label]) => domEl('button', {
+            type: 'button', class: 'btn dg-mode-opt', 'data-dgmode': m, 'aria-pressed': String(dgMode === m),
+            onclick: () => { dgMode = m; setDevPref('diagramMode', m); buildSettings(); applyDgMode(); },
+          }, label)))),
+      domEl('div', { class: 'set-row' },
+        domEl('span', null, 'Barra in basso'),
+        domEl('div', { class: 'seg-btns', role: 'group', 'aria-label': 'Barra in basso' },
+          [[true, 'Si riduce da sola'], [false, 'Sempre aperta']].map(([v, label]) => domEl('button', {
+            type: 'button', class: 'btn bar-auto-opt', 'data-barauto': String(v), 'aria-pressed': String(barAuto === v),
+            onclick: () => { barAuto = v; setDevPref('barAutoCollapse', v); buildSettings(); panel.setAutoCollapse(v); },
+          }, label)))),
+      domEl('div', { class: 'set-row' },
         domEl('span', null, 'Durate'),
         domEl('div', { class: 'seg-btns', role: 'group', 'aria-label': 'Durate degli accordi' }, modeBtns)),
       domEl('div', { class: 'set-row' },
         domEl('span', null, mode === 'estimated' ? 'Durata media (battiti)' : 'Battiti per accordo'),
         domEl('div', { class: 'seg-btns', role: 'group', 'aria-label': mode === 'estimated' ? 'Durata media' : 'Battiti per accordo' }, beatsBtns))));
+    if (wasOpen) settingsHolder.querySelector('details').open = true;
   };
 
   // ---- BPM from the play panel ----
@@ -674,6 +695,11 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
       curEl.style.setProperty('--p', '0');
     }
     if (nextEl) nextEl.classList.add('next');
+    {
+      const nameAt = (k) => { const e = k >= 0 ? timeline.events[k] : null; return e && !e.rest ? e.name : null; };
+      sideNames = { cur: counting ? null : nameAt(i), next: nameAt(counting ? startEvent : nextOverride >= 0 ? nextOverride : i + 1) };
+      paintSideChords();
+    }
     lastProgress = -1;
     // in a gap (music that is not in the sheet) nothing is current: the sheet goes to the section that picks up again
     const inGap = !counting && nextOverride >= 0 && i < 0;
@@ -715,6 +741,7 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
     gapp.player.timeSec = info.timeSec;
     gapp.player.eventIndex = info.eventIndex;
     gapp.player.beatIndex = info.beatIndex;
+    panel.setTime(Math.max(0, info.timeSec), timeline.totalSec);
     // inside a stretch of music that is not in the sheet (3 s or more): no chord is current, the panel counts down
     const gap = info.state !== 'counting' && timeline.gaps ? timeline.gaps.find((g) => g.endSec - g.startSec >= GAP_MIN_SEC && info.timeSec >= g.startSec && info.timeSec < g.endSec) : null;
     const eventIndex = gap ? -1 : info.eventIndex;
@@ -777,6 +804,7 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
   function onState(st) {
     if (panel) panel.setPlayLabel(st);
     screen.classList.toggle('is-playing', st === 'counting' || st === 'playing');
+    if (typeof syncPad === 'function' && panel) syncPad();
     if (st === 'counting' || st === 'playing') {
       // re-apply the highlight and scroll again (layout may have changed while paused)
       lastKey = '';
@@ -798,6 +826,7 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
   }
 
   function idlePanel() {
+    panel.setTime(0, timeline.totalSec);
     const first = timeline.events[0] || null;
     // the rhythm row of the first section is already there when stopped: the panel has the same height in play
     const sec0 = song.sections[first ? first.sectionIndex : 0];
@@ -822,6 +851,8 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
     },
     onSpeed: (v) => {
       speed = v;
+      song.view.speedPct = Math.round(v * 100);
+      persist();
       // with audio the media time does not depend on the speed: only the playback rate changes
       if (audioPlayer) audioPlayer.setRate(v);
       rebuildTimeline();
@@ -893,7 +924,8 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
       bpmUndo = null;
       refreshAfterBpm();
     },
-    speedPct: 100,
+    speedPct: Math.round(speed * 100),
+    autoCollapse: barAuto,
     metronomeOn,
     // short screens: small diagrams in the panel are off unless the user turned them on
     diagramsOn: typeof song.view.panelDiagrams === 'boolean' ? song.view.panelDiagrams : window.innerHeight >= LOW_SCREEN_PX,
@@ -1107,10 +1139,52 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
   }
 
   const dgHolder = domEl('div', { class: 'dg-holder' });
+  const sideHolder = domEl('aside', { class: 'side-holder' });
+  let sideCol = null;
+  let sideBtns = new Map();
   const buildDiagrams = () => {
     domClear(dgHolder);
-    dgHolder.append(renderDiagramRow(song, (name) => openChordSheet(song, name)));
+    domClear(sideHolder);
+    sideCol = null;
+    sideBtns = new Map();
+    if (dgMode === 'top') dgHolder.append(renderDiagramRow(song, (name) => openChordSheet(song, name)));
+    if (dgMode === 'side') {
+      sideCol = renderDiagramColumn(song, (name) => openChordSheet(song, name));
+      for (const b of sideCol.querySelectorAll('.dg-btn')) sideBtns.set(b.getAttribute('data-orig'), b);
+      sideHolder.append(sideCol);
+    }
+    sideCur = sideNext = null;
+    paintSideChords();
   };
+  function applyDgMode() {
+    screen.dataset.dg = dgMode;
+    buildDiagrams();
+    syncPad();
+  }
+  // the chord diagram of the current chord is lit like the chord in the text, the next one is dashed; the column scrolls to keep it in view
+  let sideCur = null;
+  let sideNext = null;
+  let sideNames = { cur: null, next: null };
+  function paintSideChords() {
+    if (!sideCol) return;
+    const c = sideNames.cur ? sideBtns.get(sideNames.cur) || null : null;
+    const n = sideNames.next ? sideBtns.get(sideNames.next) || null : null;
+    if (sideCur && sideCur !== c) sideCur.classList.remove('cur');
+    if (sideNext && sideNext !== n) sideNext.classList.remove('next');
+    sideCur = c;
+    sideNext = n && n !== c ? n : null;
+    if (sideCur) sideCur.classList.add('cur');
+    if (sideNext) sideNext.classList.add('next');
+    const target = sideCur || sideNext;
+    if (target) {
+      const top = target.offsetTop;
+      const h = target.offsetHeight;
+      const view = sideCol.clientHeight;
+      if (top < sideCol.scrollTop + 6 || top + h > sideCol.scrollTop + view - 6) {
+        sideCol.scrollTo({ top: Math.max(0, top - Math.max(6, (view - h) / 3)), behavior: 'smooth' });
+      }
+    }
+  }
 
   // ---- transposition and capo ----
   const trInd = domEl('button', { type: 'button', class: 'btn tr-ind', id: 'tr-indicator', onclick: () => setTranspose(0) });
@@ -1155,7 +1229,7 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
 
   const bottom = domEl('div', { class: 'bottombar' }, panel.el, editBar);
 
-  const screen = domEl('div', { class: 'screen song', style: { '--fs': String(song.view.fontScale) } },
+  const screen = domEl('div', { class: 'screen song', 'data-dg': dgMode, style: { '--fs': String(song.view.fontScale) } },
     topbar,
     domEl('header', { class: 'song-head' },
       domEl('h1', { id: 'song-title' }, song.title),
@@ -1167,7 +1241,7 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
       domEl('div', { class: 'tools' }, collapseBtn, editBtn),
       audioBar),
     notice,
-    bodyHolder,
+    domEl('div', { class: 'song-main' }, bodyHolder, sideHolder),
     warnings,
     domEl('footer', { class: 'song-foot' },
       domEl('button', {
@@ -1190,7 +1264,13 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
 
   function syncPad() {
     const visible = editMode ? editBar : panel.el;
-    screen.style.setProperty('--pp-h', Math.ceil(visible.getBoundingClientRect().height) + 'px');
+    const ph = Math.ceil(visible.getBoundingClientRect().height);
+    screen.style.setProperty('--pp-h', ph + 'px');
+    // the side column sticks under the top bar (which scrolls away while playing) and stops above the bottom bar
+    const playing = screen.classList.contains('is-playing');
+    const tb = playing ? 0 : Math.ceil(topbar.getBoundingClientRect().height);
+    screen.style.setProperty('--side-top', tb + 'px');
+    screen.style.setProperty('--side-h', Math.max(120, window.innerHeight - ph - tb - 8) + 'px');
   }
 
   let resizeObs = null;
@@ -1200,6 +1280,7 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
     resizeObs.observe(editBar);
   }
 
+  window.addEventListener('resize', syncPad);
   applyTheme(song.view.theme);
   paintTheme();
   buildMeta();
@@ -1220,6 +1301,7 @@ export function showSongScreen(root, song, { onBack, onDeleted }) {
       metroPlayer.destroy();
       destroyAudioPlayer();
       if (resizeObs) resizeObs.disconnect();
+      window.removeEventListener('resize', syncPad);
       for (const ev of ['wheel', 'touchstart', 'touchmove', 'keydown']) window.removeEventListener(ev, noteManualScroll);
       if (window.__gapp === gapp) delete window.__gapp;
     },

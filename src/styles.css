@@ -489,3 +489,57 @@ h1, h2, h3, p, ul, ol, dl, dd { margin: 0; }
 /* the four steps of the nudge sheet stay on one row, also at 320 px (round 12) */
 .nudge-sheet .sync-fine { display: flex; flex-wrap: nowrap; gap: 6px; }
 .nudge-sheet .sync-fine .btn { flex: 1 1 0; min-width: 0; padding-left: 4px; padding-right: 4px; font-size: 15px; white-space: nowrap; }
+
+/* Round 13: Tempo control (slowdown), mini bar */
+.pp-full { display: grid; gap: 4px; min-width: 0; }
+.pp-tempo { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.playpanel .btn.pp-speed-step { min-width: 40px; width: 40px; min-height: 40px; padding: 0; font-size: 20px; touch-action: manipulation; user-select: none; -webkit-user-select: none; flex: none; }
+.pp-tempo-val { flex: 1 1 0; min-width: 0; min-height: 40px; display: grid; align-content: center; justify-items: center; gap: 0; padding: 0 2px; border: 1px solid var(--accent); border-radius: 10px; background: none; color: var(--fg); cursor: pointer; font-family: var(--ui); }
+.pp-tempo-pct { font: 800 16px/1.05 var(--ui); }
+.pp-tempo-bpm { font: 600 11px/1.15 var(--ui); color: var(--muted); white-space: nowrap; }
+.playpanel .btn.pp-chip { flex: none; min-width: 38px; width: 38px; padding: 0; font-size: 13px; min-height: 40px; }
+.playpanel .btn.pp-chip[aria-pressed="true"] { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+.playpanel.pp-slow .pp-tempo-pct { color: var(--accent); }
+.pp-speed-lbl, .pp-speed-hint { font: 13px var(--ui); color: var(--muted); }
+.pp-speed-hint:empty { display: none; }
+#pp-speededit[hidden] { display: none; }
+.pp-mini { display: none; align-items: center; gap: 8px; min-height: 46px; min-width: 0; cursor: pointer; }
+.playpanel.collapsed .pp-full { display: none; }
+.playpanel.collapsed .pp-mini { display: flex; animation: pp-pop .16s ease-out; }
+.playpanel.collapsed { padding-top: 2px; padding-bottom: calc(2px + env(safe-area-inset-bottom)); gap: 0; }
+.playpanel:not(.collapsed) .pp-full { animation: pp-pop .16s ease-out; }
+@keyframes pp-pop { from { opacity: .3; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.playpanel .btn.pp-mini-play { flex: none; min-width: 64px; min-height: 44px; }
+.pp-mini-chords { flex: 1 1 0; min-width: 0; display: flex; align-items: baseline; gap: 6px; white-space: nowrap; overflow: hidden; font-family: var(--mono); }
+.pp-mini-cur { font-weight: 800; font-size: 20px; color: var(--cc, var(--fg)); overflow: hidden; text-overflow: ellipsis; }
+.pp-mini-arrow { color: var(--muted); }
+.pp-mini-next { font-weight: 700; font-size: 15px; color: var(--cc, var(--muted)); opacity: .8; }
+.pp-mini-time, .pp-mini-flags { flex: none; font: 600 12px var(--ui); color: var(--muted); white-space: nowrap; }
+.pp-mini-speed { flex: none; font: 800 13px var(--ui); color: var(--accent-fg); background: var(--accent); border-radius: 10px; padding: 2px 6px; }
+.pp-mini-speed[hidden] { display: none; }
+.playpanel .btn.pp-mini-handle { flex: none; min-width: 44px; min-height: 44px; padding: 0; font-size: 16px; }
+@media (max-width: 340px) { .pp-mini-time { display: none; } .playpanel .btn.pp-mini-play { min-width: 56px; padding: 0 6px; } }
+
+/* Round 13: chord diagrams in a column at the side of the song */
+.screen { --dgw: 72px; }
+@media (min-width: 560px) { .screen { --dgw: 104px; } }
+.song-main { display: block; min-width: 0; }
+.song-main > * { min-width: 0; }
+.screen[data-dg="side"] .song-main { display: grid; grid-template-columns: minmax(0, 1fr) var(--dgw); gap: 6px; }
+.screen[data-dg="side"] .sec { padding: 8px 8px 10px; }
+.screen:not([data-dg="side"]) .side-holder { display: none; }
+.screen:not([data-dg="top"]) .dg-holder { display: none; }
+.side-holder { position: relative; align-self: stretch; }
+.dg-col {
+  position: sticky; top: var(--side-top, 0px); height: var(--side-h, 60vh); overflow-y: auto; overflow-x: hidden;
+  display: flex; flex-direction: column; gap: 6px; padding: 2px 2px 6px 0; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.dg-col::-webkit-scrollbar { display: none; }
+.dg-side-btn { min-width: 0; width: 100%; min-height: 0; padding: 3px 2px 2px; border-width: 2px; border-radius: 10px; border-color: color-mix(in srgb, var(--cc) 45%, var(--line)); gap: 0; flex: none; scroll-snap-align: none; }
+.dg-side-btn .dg-svg { display: block; width: 100%; }
+.dg-side-btn svg { width: 100%; height: auto; }
+.dg-side-btn .dg-name { font-size: 14px; line-height: 1.2; }
+.dg-side-btn.none { width: 100%; }
+.dg-side-btn.next { border-color: var(--cc); border-style: dashed; }
+.dg-side-btn.cur { background: var(--cc); color: var(--bg); border-color: var(--cc); box-shadow: 0 0 0 2px var(--cc); }

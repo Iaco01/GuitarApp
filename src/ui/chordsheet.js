@@ -34,6 +34,30 @@ export function renderDiagramRow(song, onTap) {
   return row;
 }
 
+// Column of diagrams for the side of the song (round 13): one button per chord of the song, in order of first appearance, with the
+// name under the diagram. The SVG scales to the width of the column (CSS). `onTap(writtenName)`.
+export function renderDiagramColumn(song, onTap) {
+  const col = domEl('div', { class: 'dg-col', id: 'dg-col', 'aria-label': 'Accordi usati' });
+  for (const name of song.chords) {
+    const shown = displayChordName(song, name);
+    const shapes = getChordShapes(shown);
+    const btn = domEl('button', {
+      type: 'button',
+      class: 'dg-btn dg-side-btn' + (shapes.length ? '' : ' none'),
+      'data-chord': shown,
+      'data-orig': name,
+      'aria-label': 'Accordo ' + shown,
+      style: { '--cc': chordColorVar(song, name) },
+      onclick: () => onTap(name),
+    });
+    const holder = domEl('span', { class: 'dg-svg' });
+    if (shapes.length) holder.innerHTML = renderDiagramSvg(shapes[0], { size: 64 });
+    btn.append(holder, domEl('span', { class: 'dg-name' }, shown));
+    col.append(btn);
+  }
+  return col;
+}
+
 function openSheet(label, build) {
   const close = () => {
     sheet.remove();

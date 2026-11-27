@@ -17,6 +17,7 @@ import { mp3Layout, mp3Kind, mp3DurationSec, planMp3Slice } from './mp3seek.js';
 
 const AUDIO_TICK_MS = 25;
 const REVOKE_DELAY_MS = 10000;
+const CLICK_LATE_TOLERANCE_SEC = 0.05; // = lateTolerance of createMediaClickCore
 
 export function createAudioPlayer({ timeline, blob, latencyMs = 0, onFrame, onState, onNotice, onError } = {}) {
   let tl = timeline;
@@ -70,7 +71,9 @@ export function createAudioPlayer({ timeline, blob, latencyMs = 0, onFrame, onSt
   const mediaPos = () => originSec + (loading ? 0 : el.currentTime);
   // (right after a jump the blob plays its few lead frames before the wanted time: the position shown never goes before the time asked)
   let floorSec = 0;
-  const pos = () => Math.max(mediaPos(), floorSec) - latency;
+  // (the delay of the output path is real time: at a slower rate it covers less of the file)
+  const latMedia = () => latency * rate;
+  const pos = () => Math.max(mediaPos(), floorSec) - latMedia();
 
   const scanReady = (async () => {
     try {
@@ -210,7 +213,7 @@ export function createAudioPlayer({ timeline, blob, latencyMs = 0, onFrame, onSt
 
   // ---- seeking and loop ----
   function seekDisplay(sec) {
-    seekMedia(Math.max(0, sec + latency));
+    seekMedia(Math.max(0, sec + latMedia()));
   }
 
   function checkLoop() {
@@ -361,7 +364,12 @@ export function createAudioPlayer({ timeline, blob, latencyMs = 0, onFrame, onSt
       el.defaultPlaybackRate = rate;
       el.playbackRate = rate;
       restartDrift();
-      if (state === 'playing') resetClicks(mediaPos());
+      // the beats up to the current position were already heard: restarting from "a beat just behind" (the tolerance of reset)
+      // would sound the last one twice
+      if (state === 'playing') {
+        cancelClicks();
+        core.reset(mediaPos() + CLICK_LATE_TOLERANCE_SEC);
+      }
     },
     setLatency(ms) {
       latency = (Number(ms) || 0) / 1000;
@@ -396,7 +404,7 @@ export function createAudioPlayer({ timeline, blob, latencyMs = 0, onFrame, onSt
           return typeof v === 'function' ? v.bind(target) : v;
         },
         set(target, prop, value) {
-          if (prop === 'currentTime') { api.seek(Number(value) - latency); return true; }
+          if (prop === 'currentTime') { api.seek(Number(value) - latMedia()); return true; }
           return Reflect.set(target, prop, value, target);
         },
       });
