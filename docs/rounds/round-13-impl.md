@@ -61,3 +61,22 @@ La velocità esiste già (50–100%, `preservesPitch`), ma è nascosta nel menu 
   - le misure;
   - le decisioni, riportate anche in `docs/DECISIONS.md`;
   - una risposta finale di 15 righe al massimo.
+
+## 5. Aggiunta dell'utente: numero del dito nei diagrammi
+L'utente vorrebbe nel diagramma, oltre al cerchio, il **numero del dito** (1 indice, 2 medio, 3 anulare, 4 mignolo; T pollice se serve), se si trova nell'MHT.
+
+Verifica del coordinatore: nell'MHT reale **i diagrammi di UG sono `<canvas>` disegnati da JavaScript** (15 canvas, nessun SVG di accordo, nessun dato "fingers"/"applicature"). Il salvataggio della pagina non conserva né il disegno né le diteggiature, quindi dall'MHT non si possono ricavare.
+
+Da fare:
+- Aggiungi le diteggiature standard al dizionario (`src/chords-db.js`, campo `fingers` già previsto ma non usato):
+  - per ogni forma aperta scritta a mano;
+  - per le forme barré generate: forma E `1 3 4 2 1 1`, forma A `x 1 3 3 3 1` o `x 1 2 3 4 1` secondo la qualità, adattate a m, 7, m7, maj7 e sus.
+- Usa le diteggiature più comuni. Il barré si disegna come barra, con il numero 1.
+- Il parser cerca comunque eventuali diteggiature nell'MHT: per esempio dati JSON di UG con `fingers`, in altre pagine salvate diversamente. Se ci sono, prevalgono sul dizionario. Test con una fixture sintetica.
+- In `src/diagram.js` il numero va dentro il cerchio, bianco su scuro, leggibile anche nei diagrammi piccoli della colonna laterale. Se il cerchio è troppo piccolo (< 12 px) il numero va sotto la corda, in fondo al diagramma.
+- Impostazione "Numeri delle dita: sì / no", predefinita sì.
+- Test sui dati:
+  - per ogni forma, dita da 1 a 4 solo sulle corde premute;
+  - nessun dito sulle corde a vuoto o mute;
+  - lo stesso dito su tasti diversi solo nel barré.
+- Controlla a occhio uno screenshot dei diagrammi di G, C, D, Em, Am, F, Bm e B7.
