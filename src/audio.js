@@ -280,7 +280,10 @@ export function createAudioPlayer({ timeline, blob, latencyMs = 0, onFrame, onSt
   });
   el.addEventListener('ended', () => {
     halt();
+    // stopped first: seekMedia carries on playing when the state is still 'playing' (the new slice would restart the song)
+    state = 'stopped';
     seekMedia(0);
+    el.pause();
     setState('stopped');
     if (onFrame) onFrame(info());
   });
