@@ -521,8 +521,12 @@ h1, h2, h3, p, ul, ol, dl, dd { margin: 0; }
 @media (max-width: 340px) { .pp-mini-time { display: none; } .playpanel .btn.pp-mini-play { min-width: 56px; padding: 0 6px; } }
 
 /* Round 13: chord diagrams in a column at the side of the song */
-.screen { --dgw: 72px; }
-@media (min-width: 560px) { .screen { --dgw: 104px; } }
+/* the column takes about a third of the width and holds as many diagrams side by side as fit (2 on a phone held upright,
+   3-4 on a phone held sideways or on a tablet) */
+.screen { --dgw: clamp(116px, 30vw, 460px); --dgcell: 54px; }
+@media (min-width: 768px) and (min-height: 600px) { .screen { --dgw: clamp(200px, 26vw, 420px); --dgcell: 86px; } }
+/* the song keeps its reading width: the column is added beside it on wide screens */
+.screen[data-dg="side"] { max-width: calc(760px + var(--dgw) + 6px); }
 .song-main { display: block; min-width: 0; }
 .song-main > * { min-width: 0; }
 .screen[data-dg="side"] .song-main { display: grid; grid-template-columns: minmax(0, 1fr) var(--dgw); gap: 6px; }
@@ -532,7 +536,7 @@ h1, h2, h3, p, ul, ol, dl, dd { margin: 0; }
 .side-holder { position: relative; align-self: stretch; }
 .dg-col {
   position: sticky; top: var(--side-top, 0px); height: var(--side-h, 60vh); overflow-y: auto; overflow-x: hidden;
-  display: flex; flex-direction: column; gap: 6px; padding: 2px 2px 6px 0; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--dgcell), 1fr)); align-content: start; gap: 6px; padding: 2px 2px 6px 0; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
 }
 .dg-col::-webkit-scrollbar { display: none; }
