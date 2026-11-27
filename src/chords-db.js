@@ -67,6 +67,43 @@ const DB_BARRES = {
   B: [[{ fret: 2, from: 1, to: 5 }]], Cm: [[{ fret: 3, from: 1, to: 5 }]], Bm: [[{ fret: 2, from: 1, to: 5 }]],
 };
 
+// Fingers of the hand-written shapes, same order as DB_OPEN (1 index, 2 middle, 3 ring, 4 little, '-' none).
+const DB_FINGERS = {
+  C: ['- 3 2 - 1 -'], D: ['- - - 1 3 2'], E: ['- 2 3 1 - -'], G: ['2 1 - - - 3', '2 1 - - 3 4'], A: ['- - 1 2 3 -'],
+  F: ['1 3 4 2 1 1', '- - 3 2 1 1'], B: ['- 1 2 3 4 1'],
+  Cm: ['- 1 3 4 2 1'], Am: ['- - 2 3 1 -'], Em: ['- 2 3 - - -'], Dm: ['- - - 2 3 1'], Bm: ['- 1 3 4 2 1'],
+  C7: ['- 3 2 4 1 -'], D7: ['- - - 2 1 3'], E7: ['- 2 - 1 - -', '- 2 3 1 4 -'], G7: ['3 2 - - - 1'], A7: ['- - 2 - 3 -'], B7: ['- 2 1 3 - 4'],
+  Am7: ['- - 2 - 1 -'], Em7: ['- 2 - - - -', '- 1 2 - 3 -'], Dm7: ['- - - 2 1 1'],
+  Cmaj7: ['- 3 2 - - -'], Dmaj7: ['- - - 1 2 3'], Emaj7: ['- 3 1 2 - -'], Fmaj7: ['- - 3 2 1 -'], Gmaj7: ['3 2 - - - 1'], Amaj7: ['- - 2 1 3 -'],
+  Asus2: ['- - 1 2 - -'], Dsus2: ['- - - 1 3 -'], Gsus2: ['2 - - - 3 4'],
+  Asus4: ['- - 1 2 3 -'], Dsus4: ['- - - 1 3 4'], Esus4: ['- 2 3 4 - -'], Csus4: ['- 3 4 - 1 1'], Gsus4: ['2 3 - - 1 4'],
+  Cadd9: ['- 2 1 - 3 -'], Gadd9: ['2 1 - 3 - 4'], Aadd9: ['- - 1 4 2 -'], Eadd9: ['- 2 4 1 - -'], Dadd9: ['- 4 3 1 2 -'], Fadd9: ['- - 3 2 1 4'],
+  'D/F#': ['1 - - 2 4 3'], 'G/B': ['- 1 - - - 3'], 'C/G': ['4 3 2 - 1 -'], 'C/E': ['- 3 2 - 1 -'], 'Am/G': ['4 - 2 3 1 -'],
+  'A/C#': ['- 4 1 2 3 -'], 'F/C': ['- 3 4 2 1 1'], 'Em/D': ['- - - - - -'], 'D/A': ['- - - 1 3 2'], 'G/D': ['- - - - - 3'],
+};
+
+function parseFingers(text) {
+  return text.split(' ').map((t) => (t === '-' ? null : Number(t)));
+}
+
+// Fingers for a shape without hand-written ones: the barre (if any) is the index, the other fretted notes get
+// 2, 3, 4 from the lowest fret up (low string first on the same fret). null when a hand would need a fifth finger.
+export function defaultFingers(shape) {
+  const fingers = shape.frets.map(() => null);
+  const b = shape.barres && shape.barres[0];
+  let next = 1;
+  if (b) {
+    for (let i = b.from; i <= b.to; i++) if (shape.frets[i] === b.fret) fingers[i] = 1;
+    next = 2;
+  }
+  const rest = shape.frets.map((f, i) => ({ f, i })).filter(({ f, i }) => f !== 'x' && f > 0 && fingers[i] === null).sort((a, c) => a.f - c.f || a.i - c.i);
+  for (const { i } of rest) {
+    if (next > 4) return null;
+    fingers[i] = next++;
+  }
+  return fingers;
+}
+
 // Index of hand shapes by "pc|quality|bassPc".
 const DB_INDEX = new Map();
 for (const [key, list] of Object.entries(DB_OPEN)) {
@@ -76,6 +113,7 @@ for (const [key, list] of Object.entries(DB_OPEN)) {
     const shape = parseShape(t);
     shape.baseFret = baseFretOf(shape.frets);
     if (DB_BARRES[key] && DB_BARRES[key][i]) shape.barres = DB_BARRES[key][i];
+    if (DB_FINGERS[key] && DB_FINGERS[key][i]) shape.fingers = parseFingers(DB_FINGERS[key][i]);
     return shape;
   }));
 }
@@ -108,6 +146,8 @@ function barreShape(model, rootFret) {
       shape.barres = [{ fret: f, from, to }];
     }
   }
+  const fingers = defaultFingers(shape);
+  if (fingers) shape.fingers = fingers;
   return shape;
 }
 
@@ -132,7 +172,7 @@ export function getChordShapes(name) {
   const bassPc = c.bass ? pitchClassOf(c.bass) : null;
   const exact = DB_INDEX.get(`${pc}|${q}|${bassPc === null ? '' : bassPc}`);
   if (exact && (bassPc === null || exact.length)) {
-    const list = exact.map((s) => ({ ...s, frets: s.frets.slice() }));
+    const list = exact.map((s) => ({ ...s, frets: s.frets.slice(), ...(s.fingers ? { fingers: s.fingers.slice() } : {}) }));
     if (bassPc === null) {
       for (const g of generated(pc, q)) if (!list.some((s) => sameFrets(s, g))) list.push(g);
     }
@@ -140,7 +180,7 @@ export function getChordShapes(name) {
   }
   const baseKey = `${pc}|${q}|`;
   const hand = DB_INDEX.get(baseKey) || [];
-  const list = hand.map((s) => ({ ...s, frets: s.frets.slice() }));
+  const list = hand.map((s) => ({ ...s, frets: s.frets.slice(), ...(s.fingers ? { fingers: s.fingers.slice() } : {}) }));
   for (const g of generated(pc, q)) if (!list.some((s) => sameFrets(s, g))) list.push(g);
   if (bassPc !== null) for (const s of list) s.bass = c.bass;
   return list;

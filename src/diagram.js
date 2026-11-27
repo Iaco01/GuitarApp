@@ -2,8 +2,10 @@
 // follows the page theme; `theme` ('light' | 'dark') forces a colour for use outside a themed page.
 
 const DG_W = 100;
-const DG_GRID_X = 30; // left edge of the first string
-const DG_STRING_GAP = 11.2;
+const DG_GRID_X = 24; // left edge of the first string
+const DG_STRING_GAP = 13;
+const DG_DOT_R = 6.4;
+const DG_FINGERS_FROM = 40; // px width from which finger numbers are drawn inside the dots
 const DG_ROW_H = 17;
 const DG_ROWS = 5;
 const DG_TOP = 34; // top of the grid (without label)
@@ -21,7 +23,8 @@ function dgEscape(text) {
 
 // Options: size = width in px (height follows the aspect ratio), label = chord name drawn on top,
 // theme = 'light' | 'dark' (optional).
-export function renderDiagramSvg(shape, { size = 64, label = '', theme = '' } = {}) {
+// fingers = false hides the finger numbers (shape.fingers: per string 1..4 or null).
+export function renderDiagramSvg(shape, { size = 64, label = '', theme = '', fingers = true } = {}) {
   const top = DG_TOP + (label ? DG_LABEL_H : 0);
   const gridH = DG_ROWS * DG_ROW_H;
   // below 48 px the fret number would be unreadable inside the grid margin: it is drawn under the
@@ -52,12 +55,12 @@ export function renderDiagramSvg(shape, { size = 64, label = '', theme = '' } = 
     parts.push(`<text x="${DG_W / 2 + 2}" y="${dgNum(y)}" text-anchor="end" font-size="${dgNum(numPx)}" font-weight="700" fill="currentColor" font-family="system-ui,sans-serif">${shape.baseFret}</text>`);
     parts.push(`<text x="${DG_W / 2 + 4}" y="${dgNum(y)}" text-anchor="start" font-size="${dgNum(numPx * 0.7)}" font-weight="700" fill="currentColor" font-family="system-ui,sans-serif">fr</text>`);
   } else if (shape.baseFret > 1) {
-    parts.push(`<text x="${left - 9}" y="${dgNum(top + DG_ROW_H * 0.5 + 6)}" text-anchor="end" font-size="19" font-weight="700" fill="currentColor" font-family="system-ui,sans-serif">${shape.baseFret}</text>`);
+    parts.push(`<text x="${left - 9.5}" y="${dgNum(top + DG_ROW_H * 0.5 + 5.5)}" text-anchor="end" font-size="${shape.baseFret >= 10 ? 13 : 16}" font-weight="700" fill="currentColor" font-family="system-ui,sans-serif">${shape.baseFret}</text>`);
   }
   // barres
   for (const b of shape.barres || []) {
     const y = rowY(b.fret);
-    parts.push(`<rect x="${dgNum(sx(b.from) - 5.6)}" y="${dgNum(y - 5.6)}" width="${dgNum(sx(b.to) - sx(b.from) + 11.2)}" height="11.2" rx="5.6" fill="currentColor"/>`);
+    parts.push(`<rect x="${dgNum(sx(b.from) - DG_DOT_R)}" y="${dgNum(y - DG_DOT_R)}" width="${dgNum(sx(b.to) - sx(b.from) + 2 * DG_DOT_R)}" height="${dgNum(2 * DG_DOT_R)}" rx="${DG_DOT_R}" fill="currentColor"/>`);
   }
   // dots and markers
   shape.frets.forEach((f, i) => {
@@ -67,9 +70,21 @@ export function renderDiagramSvg(shape, { size = 64, label = '', theme = '' } = 
     } else if (f === 0) {
       parts.push(`<circle cx="${dgNum(x)}" cy="${top - 8}" r="4" fill="none" stroke="currentColor" stroke-width="2"/>`);
     } else {
-      parts.push(`<circle cx="${dgNum(x)}" cy="${dgNum(rowY(f))}" r="5.6" fill="currentColor"/>`);
+      parts.push(`<circle cx="${dgNum(x)}" cy="${dgNum(rowY(f))}" r="${DG_DOT_R}" fill="currentColor"/>`);
     }
   });
+  // finger numbers inside the dots, on the fret where each finger goes (a barre shows its number once, on its first string)
+  const fg = fingers && size >= DG_FINGERS_FROM && Array.isArray(shape.fingers) ? shape.fingers : null;
+  if (fg) {
+    const numFill = theme === 'dark' ? '#1d2127' : theme === 'light' ? '#ffffff' : 'var(--bg, #ffffff)';
+    shape.frets.forEach((f, i) => {
+      const n = fg[i];
+      if (f === 'x' || f === 0 || !n) return;
+      const inBarre = (shape.barres || []).some((b) => b.fret === f && i > b.from && i <= b.to && n === 1);
+      if (inBarre) return;
+      parts.push(`<text x="${dgNum(sx(i))}" y="${dgNum(rowY(f) + 3.6)}" text-anchor="middle" font-size="10.5" font-weight="700" style="fill:${numFill}" font-family="system-ui,sans-serif">${dgEscape(n)}</text>`);
+    });
+  }
   parts.push('</svg>');
   return parts.join('');
 }
