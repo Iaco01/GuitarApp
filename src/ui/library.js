@@ -60,7 +60,7 @@ async function deliverFile(name, text) {
   }, 2000);
 }
 
-export function showLibraryScreen(root, { onImportFile, message }) {
+export function showLibraryScreen(root, { onImportFile, onPasteTab = null, message }) {
   domClear(root);
   const msg = domEl('div', { class: 'msg' + (message ? ' error' : ''), role: 'alert', id: 'lib-msg' }, message || '');
   const setMsg = (text, error = false) => {
@@ -71,7 +71,7 @@ export function showLibraryScreen(root, { onImportFile, message }) {
     type: 'file',
     id: 'import-input',
     class: 'file-input',
-    accept: '.mht,.mhtml,.html,message/rfc822,multipart/related',
+    accept: '.mht,.mhtml,.html,.pdf,.txt,message/rfc822,multipart/related,application/pdf,text/plain',
     onchange: async () => {
       const file = input.files && input.files[0];
       if (!file) return;
@@ -87,8 +87,35 @@ export function showLibraryScreen(root, { onImportFile, message }) {
 
   const header = domEl('header', { class: 'lib-head' },
     domEl('h1', null, 'Accordi a tempo'),
-    domEl('label', { class: 'btn primary', for: 'import-input' }, 'Importa .mht'),
-    input);
+    domEl('label', { class: 'btn primary', for: 'import-input' }, 'Importa .mht o PDF'),
+    input,
+    onPasteTab ? domEl('button', { type: 'button', class: 'btn', id: 'btn-paste-tab', onclick: () => openPasteTab() }, 'Incolla una tab') : null);
+
+  // a tab pasted as text (the alternative when the PDF cannot be read)
+  function openPasteTab() {
+    const area = domEl('textarea', { id: 'paste-tab-text', class: 'paste-area', rows: '10', placeholder: 'Incolla qui il testo della tab (le righe e|B|G|D|A|E|)', 'aria-label': 'Testo della tab', spellcheck: 'false' });
+    const title = domEl('input', { type: 'text', id: 'paste-tab-title', class: 'paste-title', placeholder: 'Titolo (facoltativo)', 'aria-label': 'Titolo' });
+    const err = domEl('p', { class: 'msg error', id: 'paste-tab-err', role: 'alert' }, '');
+    const close = () => sheet.remove();
+    const go = domEl('button', {
+      type: 'button', class: 'btn primary', id: 'paste-tab-go',
+      onclick: async () => {
+        err.textContent = '';
+        if (!area.value.trim()) { err.textContent = 'Incolla prima il testo della tab'; return; }
+        try {
+          await onPasteTab(area.value, title.value.trim());
+          close();
+        } catch (e) {
+          err.textContent = e.message || String(e);
+        }
+      },
+    }, 'Importa');
+    const sheet = domEl('div', { class: 'sheet', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Incolla una tab' },
+      domEl('div', { class: 'sheet-card dlg' }, domEl('h2', { class: 'dlg-title' }, 'Incolla una tab'), title, area, err,
+        domEl('div', { class: 'dlg-btns' }, go, domEl('button', { type: 'button', class: 'btn', onclick: close }, 'Annulla'))));
+    document.body.append(sheet);
+    area.focus();
+  }
 
   const settings = getSettings();
   let sortMode = SORT_MODES.some(([k]) => k === settings.librarySort) ? settings.librarySort : 'opened';
@@ -134,7 +161,7 @@ export function showLibraryScreen(root, { onImportFile, message }) {
     }
     const list = domEl('ul', { class: 'songs' });
     for (const s of shown) {
-      const meta = [s.artist, s.difficulty, formatDateIt(s.importedAt)].filter(Boolean).join(' · ');
+      const meta = [s.kind === 'tab' ? 'Tab' : '', s.artist, s.difficulty, formatDateIt(s.importedAt)].filter(Boolean).join(' · ');
       const edited = s.timingSource === 'edited' || s.timingSource === 'recorded';
       list.append(domEl('li', { 'data-id': s.id },
         domEl('a', { class: 'song-row', href: '#/song/' + encodeURIComponent(s.id) },
@@ -154,7 +181,7 @@ export function showLibraryScreen(root, { onImportFile, message }) {
               return;
             }
             audioStoreDelete(s.id).then(() => {});
-            showLibraryScreen(root, { onImportFile });
+            showLibraryScreen(root, { onImportFile, onPasteTab });
           },
         }, '✕')));
     }
@@ -220,7 +247,7 @@ export function showLibraryScreen(root, { onImportFile, message }) {
       return;
     }
     const r = applyImport(plan, mode, parsed.settings);
-    showLibraryScreen(root, { onImportFile });
+    showLibraryScreen(root, { onImportFile, onPasteTab });
     const m = document.getElementById('lib-msg');
     if (m) {
       m.className = 'msg';

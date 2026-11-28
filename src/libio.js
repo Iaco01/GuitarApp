@@ -119,7 +119,7 @@ export function parseExport(text) {
     }
     const v = validateSong(song);
     const errors = v.errors.slice();
-    if (Array.isArray(song.sections) && song.sections.length === 0) errors.push('nessuna sezione');
+    if (song.kind !== 'tab' && Array.isArray(song.sections) && song.sections.length === 0) errors.push('nessuna sezione');
     if (seen.has(song.id)) errors.push('id duplicato nel file');
     if (errors.length) {
       invalid.push({ label, errors });

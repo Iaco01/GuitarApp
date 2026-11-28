@@ -42,6 +42,51 @@ export function createSchedulerCore({ beats, lookahead = 0.1, lateTolerance = 0.
   };
 }
 
+// Same as the scheduler core, for the notes of the synth guitar: `notes` sorted by startSec (song time). pull(now) gives
+// [{ note, when }] for the notes due before now + lookahead; with a loop it wraps from loop.endSec to loop.startSec on the
+// same continuous clock. A note of a loop range that is not there is simply not in the way.
+export function createNoteScheduler({ notes, lookahead = 0.1, lateTolerance = 0.05, loop = null }) {
+  let next = 0;
+  let origin = 0;
+  let offset = 0;
+  const lowerBound = (t) => {
+    let lo = 0;
+    let hi = notes.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (notes[mid].startSec < t - 1e-9) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  };
+  const loopOk = !!loop && loop.endSec > loop.startSec && lowerBound(loop.startSec) < notes.length && notes[lowerBound(loop.startSec)].startSec < loop.endSec;
+  return {
+    start({ fromSec, offsetSec, originCtx }) {
+      next = lowerBound(fromSec);
+      offset = offsetSec;
+      origin = originCtx;
+    },
+    pull(now) {
+      const out = [];
+      for (;;) {
+        if (loopOk && (next >= notes.length || notes[next].startSec >= loop.endSec)) {
+          origin += loop.endSec - loop.startSec;
+          next = lowerBound(loop.startSec);
+          if (origin - offset + loop.startSec >= now + lookahead + (loop.endSec - loop.startSec)) break;
+          continue;
+        }
+        if (next >= notes.length) break;
+        const n = notes[next];
+        const when = origin + (n.startSec - offset);
+        if (when >= now + lookahead) break;
+        if (when >= now - lateTolerance) out.push({ note: n, when });
+        next++;
+      }
+      return out;
+    },
+  };
+}
+
 // First beat index at or after song time `sec`.
 export function firstBeatIndexFrom(timeline, sec) {
   if (timeline.beats.length === 0) return 0;
@@ -96,7 +141,9 @@ export function createWakeKeeper({ onNotice, isDestroyed = () => false } = {}) {
   };
 }
 
-export function createPlayer({ timeline, timeSignature = [4, 4], onFrame, onState, onNotice } = {}) {
+// `synth` (optional): { create(ctx) -> engine } with engine.play(note, when), engine.silence(futureOnly), engine.destroy(): the notes of
+// the synth guitar (setNotePlan) are scheduled on the same clock and with the same lookahead as the clicks.
+export function createPlayer({ timeline, timeSignature = [4, 4], onFrame, onState, onNotice, synth = null } = {}) {
   let tl = timeline;
   let state = 'stopped'; // stopped | counting | playing | paused
   let ctx = null;
@@ -107,6 +154,11 @@ export function createPlayer({ timeline, timeSignature = [4, 4], onFrame, onStat
   let metronome = true;
   let loopSection = null;
   let core = null;
+  let engine = null;
+  let synthOn = false;
+  let notePlan = [];
+  let noteCore = null;
+  let volumeWanted = 0.8;
   let timer = null;
   let raf = 0;
   const wake = createWakeKeeper({ onNotice, isDestroyed: () => destroyed });
@@ -189,6 +241,15 @@ export function createPlayer({ timeline, timeSignature = [4, 4], onFrame, onStat
     if (!usingAudio || !core) return;
     const due = core.pull(ctx.currentTime);
     if (metronome) for (const b of due) click(b.when, b.accent);
+    if (noteCore && engine) for (const d of noteCore.pull(ctx.currentTime)) engine.play(d.note, d.when);
+  }
+
+  // the notes of the synth from song time `fromSec`, on the clock origin `originCtx`
+  function makeNoteCore(fromSec, offsetSec, originCtx) {
+    noteCore = null;
+    if (!synthOn || !engine || !notePlan.length) return;
+    noteCore = createNoteScheduler({ notes: notePlan, loop: loopSpec() });
+    noteCore.start({ fromSec, offsetSec, originCtx });
   }
 
   function frame() {
@@ -218,6 +279,8 @@ export function createPlayer({ timeline, timeSignature = [4, 4], onFrame, onStat
       else clearTimeout(raf);
     }
     raf = 0;
+    noteCore = null;
+    if (engine) engine.silence(false);
     releaseWake();
   }
 
@@ -233,6 +296,7 @@ export function createPlayer({ timeline, timeSignature = [4, 4], onFrame, onStat
         await Promise.race([ctx.resume(), new Promise((r) => setTimeout(r, 600))]);
       }
       usingAudio = ctx.state === 'running';
+      if (usingAudio && synth && !engine) { engine = synth.create(ctx); engine.setVolume(volumeWanted); }
     } catch {
       usingAudio = false;
     }
@@ -265,7 +329,7 @@ export function createPlayer({ timeline, timeSignature = [4, 4], onFrame, onStat
     countSpb = 60 / sectionBpmAt(sec) / tl.speed;
     const t0 = clock() + 0.08;
     if (count) {
-      if (usingAudio && metronome) for (let k = 0; k < countBeats; k++) click(t0 + k * countSpb, k === 0);
+      if (usingAudio && (metronome || (synthOn && notePlan.length))) for (let k = 0; k < countBeats; k++) click(t0 + k * countSpb, k === 0);
       anchor = t0 + countBeats * countSpb;
       setState('counting');
     } else {
@@ -275,6 +339,7 @@ export function createPlayer({ timeline, timeSignature = [4, 4], onFrame, onStat
     offset = sec;
     core = createSchedulerCore({ beats: tl.beats, loop: loopSpec() });
     core.start({ fromIndex: firstBeatIndexFrom(tl, sec), offsetSec: sec, originCtx: anchor });
+    makeNoteCore(sec, sec, anchor);
     if (usingAudio) {
       timer = setInterval(tick, 25);
       tick();
@@ -297,6 +362,7 @@ export function createPlayer({ timeline, timeSignature = [4, 4], onFrame, onStat
     if (!live) return;
     if (state === 'playing') {
       cancelPendingClicks();
+      if (engine) engine.silence(true);
       offset = timeAtBeatPosition(tl, beatPos);
       anchor = clock() - latency();
     } else {
@@ -304,9 +370,21 @@ export function createPlayer({ timeline, timeSignature = [4, 4], onFrame, onStat
     }
     core = createSchedulerCore({ beats: tl.beats, loop: loopSpec() });
     core.start({ fromIndex: firstBeatIndexFrom(tl, offset + 0.001), offsetSec: offset, originCtx: anchor });
+    if (state === 'playing') makeNoteCore(offset + 0.001, offset, anchor);
   }
 
   const api = {
+    // The notes of the synth guitar for the current timeline (see tabsynth.js). Call before setTimeline when both change.
+    setNotePlan(plan) {
+      notePlan = plan || [];
+      if (engine && state === 'playing') { engine.silence(true); makeNoteCore(position() + 0.001, offset, anchor); }
+    },
+    setSynth(on) {
+      synthOn = !!on;
+      if (!synthOn) { noteCore = null; if (engine) engine.silence(false); return; }
+      if (state === 'playing') makeNoteCore(position() + 0.001, offset, anchor);
+    },
+    setSynthVolume(v) { if (engine) engine.setVolume(v); volumeWanted = v; },
     play() {
       if (state === 'playing' || state === 'counting') return Promise.resolve();
       return startAt(state === 'paused' ? restPos : 0);
@@ -350,6 +428,7 @@ export function createPlayer({ timeline, timeSignature = [4, 4], onFrame, onStat
         anchor = clock() - latency();
         core = createSchedulerCore({ beats: tl.beats, loop: null });
         core.start({ fromIndex: firstBeatIndexFrom(tl, p + 0.001), offsetSec: p, originCtx: anchor });
+        makeNoteCore(p + 0.001, p, anchor);
       }
     },
     getLoop: () => loopSection,
@@ -361,6 +440,7 @@ export function createPlayer({ timeline, timeSignature = [4, 4], onFrame, onStat
       destroyed = true;
       startAt.token = null;
       halt();
+      if (engine) engine.destroy();
       if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisibility);
       if (ctx) { try { ctx.close(); } catch { /* ignore */ } }
     },

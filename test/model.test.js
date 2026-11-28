@@ -12,7 +12,7 @@ const sample = () => createSong({
 
 test('createSong has the documented defaults and is JSON-serialisable', () => {
   const s = createSong();
-  assert.equal(s.schemaVersion, 3);
+  assert.equal(s.schemaVersion, 4);
   assert.match(s.id, /\S{8,}/);
   assert.deepEqual(s.timeSignature, [4, 4]);
   assert.equal(s.timingSource, 'default');
@@ -93,7 +93,7 @@ test('migrateSong from schema 1 adds section fields and proposes tempos', () => 
   const old = { schemaVersion: 1, id: 'x', bpm: 62, strumming: [pat('Verse 1', 62), pat('Chorus', 96)],
     sections: [{ name: 'Verse 1', lines: [] }, { name: 'Chorus', lines: [] }] };
   const m = migrateSong(old);
-  assert.equal(m.schemaVersion, 3);
+  assert.equal(m.schemaVersion, 4);
   assert.deepEqual(m.sections.map((s) => [s.bpm, s.bpmSource, s.strumIndex]), [[62, 'strumming', 0], [96, 'strumming', 1]]);
   applySectionTempos(m);
   m.sections[0].bpm = 70; m.sections[0].bpmSource = 'edited';

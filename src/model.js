@@ -3,7 +3,8 @@
 import { estimateSongDurations } from './durations.js';
 import { normalizeAlignment } from './alignment.js';
 
-export const SONG_SCHEMA_VERSION = 3;
+// 4: songs have a `kind` ('chords' | 'tab'); tab songs carry `tab` (see tab.js)
+export const SONG_SCHEMA_VERSION = 4;
 export const DEFAULT_BPM = 80;
 
 function modelUuid() {
@@ -17,6 +18,7 @@ export function createSong(partial = {}) {
   const now = new Date().toISOString();
   return {
     schemaVersion: SONG_SCHEMA_VERSION,
+    kind: 'chords',
     id: modelUuid(),
     title: '',
     artist: '',
@@ -59,6 +61,7 @@ export function validateSong(obj) {
   if (obj.transpose !== undefined && !(Number.isInteger(obj.transpose) && Math.abs(obj.transpose) <= 12)) errors.push('transpose non valido (intero tra −12 e +12)');
   if (obj.capo !== undefined && !(Number.isInteger(obj.capo) && obj.capo >= 0 && obj.capo <= 12)) errors.push('capo non valido (intero tra 0 e 12)');
   if (obj.audio !== null && obj.audio !== undefined && !isObj(obj.audio)) errors.push('audio non valido');
+  if (obj.kind === 'tab' && !(isObj(obj.tab) && Array.isArray(obj.tab.parts))) errors.push('tab non valida (mancano le parti)');
   if (!Array.isArray(obj.chords)) errors.push('chords deve essere un array');
   if (!Array.isArray(obj.strumming)) errors.push('strumming deve essere un array');
   if (!Array.isArray(obj.sections)) {
@@ -97,6 +100,7 @@ export function migrateSong(obj) {
   merged.importInfo = { ...base.importInfo, ...(obj && obj.importInfo ? obj.importInfo : {}) };
   const oldVersion = obj && Number.isInteger(obj.schemaVersion) ? obj.schemaVersion : 1;
   merged.schemaVersion = SONG_SCHEMA_VERSION;
+  if (merged.kind !== 'tab') merged.kind = 'chords';
   merged.audio = normalizeAudio(merged.audio);
   if (Array.isArray(merged.sections)) {
     merged.sections = merged.sections.map((sec) => ({
@@ -276,6 +280,7 @@ export function findDuplicateSongs(song, stored) {
   const norm2 = (v) => String(v || '').trim().toLowerCase();
   const out = stored.filter((s) => {
     if (!s) return false;
+    if ((s.kind || 'chords') !== (song.kind || 'chords')) return false;
     const url = s.source && s.source.url;
     if (song.source && song.source.url && url) return url === song.source.url;
     return norm2(s.title) === norm2(song.title) && norm2(s.artist) === norm2(song.artist);

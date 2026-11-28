@@ -8,7 +8,7 @@ const SPEED_MIN = 25;
 const SPEED_MAX = 100;
 
 // `diagramSvg(label)` (optional) returns the small SVG of a chord shown next to its name.
-export function createPlayPanel(song, { onLoopExit = null, onPlayPause, onStop, onSpeed, onMetronome, onTap, speedPct = 100, metronomeOn = true, diagramSvg = null, diagramsOn = true, onDiagrams = null, onNoticeClosed = null, onBpmStep = null, onBpmSet = null, onScope = null, onBpmUndo = null, bpmScope = 'all', rhythmOn = true, onRhythm = null, onOffset = null, onOffsetListen = null, autoCollapse = true, collapseMs = 4000 }) {
+export function createPlayPanel(song, { onLoopExit = null, onPlayPause, onStop, onSpeed, onMetronome, onTap, speedPct = 100, metronomeOn = true, diagramSvg = null, diagramsOn = true, onDiagrams = null, onNoticeClosed = null, onBpmStep = null, onBpmSet = null, onScope = null, onBpmUndo = null, bpmScope = 'all', rhythmOn = true, onRhythm = null, onOffset = null, onOffsetListen = null, autoCollapse = true, collapseMs = 4000, synthOn = true, onSynth = null, synthVolume = 0.8, onSynthVolume = null }) {
   const perBar = (song.timeSignature && song.timeSignature[0]) || 4;
   let speed = speedPct;
   let metro = metronomeOn;
@@ -222,7 +222,24 @@ export function createPlayPanel(song, { onLoopExit = null, onPlayPause, onStop, 
       offLbl,
       domEl('button', { type: 'button', class: 'btn', id: 'btn-offset-earlier', 'aria-label': 'Evidenzia 50 millisecondi prima', onclick: () => { if (onOffset) onOffset(1); } }, 'Prima')),
     domEl('button', { type: 'button', class: 'btn small', id: 'btn-offset-listen', onclick: () => { if (onOffsetListen) onOffsetListen(); } }, 'Ascolta e regola (5 s)'));
-  const more = domEl('div', { class: 'pp-more', id: 'pp-more', hidden: true }, metroBtn, tapBtn, dgBtn, rhBtn, stopBtn, offRow);
+  // synth guitar (tab songs): on/off and volume
+  let synOn = synthOn;
+  const synBtn = onSynth ? domEl('button', {
+    type: 'button', class: 'btn', id: 'btn-pp-synth', 'aria-pressed': String(synOn),
+    onclick: () => { synOn = !synOn; paintSyn(); onSynth(synOn); },
+  }) : null;
+  const volInput = onSynth ? domEl('input', {
+    type: 'range', id: 'pp-synth-vol', class: 'pp-vol', min: '0', max: '100', step: '1', value: String(Math.round(synthVolume * 100)), 'aria-label': 'Volume della chitarra',
+    oninput: () => { if (onSynthVolume) onSynthVolume(Number(volInput.value) / 100); },
+  }) : null;
+  function paintSyn() {
+    if (!synBtn) return;
+    synBtn.setAttribute('aria-pressed', String(synOn));
+    synBtn.textContent = synOn ? 'Chitarra: sì' : 'Chitarra: no';
+    paintFlags();
+  }
+  const synRow = onSynth ? domEl('div', { class: 'pp-synth-row' }, synBtn, domEl('label', { class: 'pp-vol-lbl' }, 'Volume', volInput)) : null;
+  const more = domEl('div', { class: 'pp-more', id: 'pp-more', hidden: true }, synRow, metroBtn, tapBtn, dgBtn, rhBtn, stopBtn, offRow);
   const moreBtn = domEl('button', {
     type: 'button', class: 'btn pp-more-btn', id: 'btn-more', 'aria-label': 'Altri comandi', 'aria-expanded': 'false', 'aria-controls': 'pp-more',
     onclick: () => {
@@ -298,7 +315,7 @@ export function createPlayPanel(song, { onLoopExit = null, onPlayPause, onStop, 
   let freeNow = false;
   let loopOn = false;
   function paintFlags() {
-    miniFlags.textContent = (loopOn ? '🔁' : '') + (freeNow ? ' libero' : '');
+    miniFlags.textContent = (loopOn ? '🔁' : '') + (freeNow ? ' libero' : '') + (onSynth && synOn ? '🎸' : '');
   }
   paintScope();
   paintSpeed();
@@ -306,6 +323,7 @@ export function createPlayPanel(song, { onLoopExit = null, onPlayPause, onStop, 
   paintDg();
   paintRhythm();
   paintClick();
+  paintSyn();
 
   function setDiagram(holder, label) {
     const key = label === null || !diagramSvg ? '' : label;
@@ -452,6 +470,8 @@ export function createPlayPanel(song, { onLoopExit = null, onPlayPause, onStop, 
       metroBtn.textContent = metro ? 'Clic: sì' : 'Clic: no';
       paintClick();
     },
+    // the synth state from outside (without firing onSynth)
+    setSynthState(on) { synOn = !!on; paintSyn(); },
     // text of the offset control, or null to hide it (no audio)
     setOffset(text) {
       offRow.hidden = text === null;

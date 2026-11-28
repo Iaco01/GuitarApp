@@ -3,6 +3,7 @@
 import { visibleText, collapseSpaces, getAttr, classTokens, findElementEnd, removeElements } from './html-text.js';
 import { extractMainHtml } from './mht.js';
 import { isChordName } from './chord.js';
+import { parseCapoText } from './capo.js';
 import { createSong, listChordNames, applySectionTempos } from './model.js';
 import { estimateSongDurations } from './durations.js';
 
@@ -225,7 +226,9 @@ function headerValue(html, label) {
 
 function parseCapo(value) {
   if (value === null) return 0;
-  if (/no\s*capo/i.test(value)) return 0;
+  if (/no\s*capo|senza|nessun/i.test(value)) return 0;
+  const c = parseCapoText('Capo ' + value);
+  if (c) return c;
   const m = /(\d+)/.exec(value);
   return m ? parseInt(m[1], 10) : 0;
 }

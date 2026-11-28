@@ -51,6 +51,7 @@ function indexEntry(song, openedAt) {
     timingSource: song.timingSource || 'default',
     bars: Array.isArray(song.sections) ? countBars(song) : 0,
   };
+  if (song.kind === 'tab') entry.kind = 'tab';
   if (song.audio) entry.hasAudio = true;
   if (openedAt) entry.openedAt = openedAt;
   return entry;
