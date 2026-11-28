@@ -106,3 +106,42 @@ Il lavoro è diviso in due round:
   - cosa non si legge;
   - le decisioni, riportate anche in `docs/DECISIONS.md`;
   - una risposta finale di 15 righe al massimo.
+
+## Aggiunte dell'utente (durante il round)
+
+### A. Capotasto
+L'utente dice che il capo è indicato. Nel testo del PDF reale il coordinatore **non lo trova**: né MarkItDown né una ricerca negli stream decompressi. Può essere disegnato in un font senza ToUnicode, oppure stare in un elemento grafico.
+- **Parser** (tab e fogli di accordi): riconosci "Capo: 2nd fret", "Capo 2", "Capo on 2", "capo II", "Capo: no capo", in inglese e in italiano ("capotasto al 2° tasto"), anche nell'intestazione della pagina. Se nel PDF ci sono glifi non decodificati vicino a "Tuning", riportalo nel report.
+- **Modello**: `capo` del brano. Nelle tab di UG i tasti sono scritti **rispetto al capo**: un tasto 0 scritto è il capo, quindi l'altezza suonata è corda vuota + capo + tasto scritto. Usalo per il synth (punto B) e per il profilo di note del round 15.
+- **UI**:
+  - il capo letto si vede in cima, per esempio "Capo 2° tasto";
+  - si può impostare o cambiare a mano dal foglio del capo, quello che esiste già;
+  - è salvato per brano;
+  - i diagrammi restano relativi al capo, come la tab.
+
+### B. Chitarra sintetica che suona la tab a tempo
+L'utente vuole sentire la tab suonata da una "chitarra synth", a tempo col cursore.
+- **Sintesi in Web Audio senza dipendenze**: corda pizzicata Karplus-Strong, con un `AudioWorklet` creato da un Blob se disponibile, altrimenti note pre-renderizzate in `AudioBuffer`. Il timbro deve essere da chitarra: attacco breve, decadimento naturale, un filtro passa-basso che chiude nel tempo.
+- **Altezza**: corda vuota dell'accordatura + capo + tasto. Accordatura dalla tab, con "Standard" come predefinita.
+- **Durata**: ogni nota suona fino alla nota successiva sulla stessa corda, oppure fino a fine battuta più una coda breve.
+- **Tecniche**:
+  - `/` e `\` slide: glissando di altezza fino alla nota successiva;
+  - `h`/`p`: legato, nuova nota senza nuovo attacco forte;
+  - `b`: bend di 1 semitono, o di quanto è scritto;
+  - `r`: rilascio;
+  - `~`: vibrato leggero;
+  - `x`: nota stoppata, breve e smorzata.
+- **Accordi** (più note nella stessa colonna): pennata con le corde sfalsate di 8–15 ms dal basso verso l'alto.
+- **Tempo**: le note si programmano con lo stesso orologio e lo stesso scheduler del metronomo (lookahead), sulla timeline della tab.
+  - Seguono la velocità del round 13: la sintesi resta all'altezza giusta, cambia solo il tempo.
+  - Seguono loop, seek e pausa senza note doppie né note che restano appese.
+- **Parti**: suona la parte scelta, oppure tutte. Con "tutte", la parte 1 si può abbassare o togliere.
+- **Controlli** nel pannello:
+  - "Chitarra synth: sì/no";
+  - volume;
+  - "Solo synth / synth + metronomo".
+  - Più avanti, con l'mp3, servirà "synth + mp3" per confrontare.
+- **Test**:
+  - unità: altezze in Hz di corda e tasto con il capo; programma di note dalla timeline, con il numero di note per battuta e i tempi;
+  - e2e: intercetta le note programmate (come per i tic) a 100% e 50%, nel loop, e dopo pausa e ripresa;
+  - un controllo audio: OfflineAudioContext, frequenza fondamentale misurata ±10 cent.
