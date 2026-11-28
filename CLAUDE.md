@@ -15,3 +15,4 @@ Web app statica per telefono: importa una pagina Ultimate Guitar salvata (.mht),
 - **Copyright**: `test/fixtures/local/` contiene una pagina reale con testo protetto. Mai copiarne il testo in file versionati, test, fixture sintetiche, report o screenshot committati. Le asserzioni sul file reale usano conteggi e nomi di sezione.
 - Playwright e Chromium sono già installati nel container: `require('playwright')` da file `.cjs`, `chromium.launch()` senza opzioni. Non installare altro. Screenshot e artefatti in `test-artifacts/` (ignorato da git).
 - Non fare push e non creare PR: lo fa il coordinatore.
+- File allegati dall'utente in formati convertibili (PDF, Word, Excel, PowerPoint, HTML, immagini…): leggerli sempre con MarkItDown (`markitdown <file>`). Se nel container manca: `python3 -m pip install --user 'markitdown[all]'`. È uno strumento della sessione, non una dipendenza del progetto.
